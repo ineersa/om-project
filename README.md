@@ -56,6 +56,32 @@ uv run python main.py normalize data/collection-2026-10-13-v1 \
 
 This command verifies and reparses the frozen inputs. It does not rediscover live sessions. The derived corpus preserves upstream source metadata and the original manifest hash. The original release remains unchanged.
 
+## Select the OM dataset
+
+The source archive preserves all collected histories. Use `curate` to create the OM-only dataset view:
+
+```bash
+uv run python main.py curate data/collection-2026-10-13-v2 \
+	--output data/curated-2026-10-13-v2
+uv run python main.py validate data/curated-2026-10-13-v2
+```
+
+The view retains only sessions with usable OM records. Observer candidates require valid structure and resolved content references. Reflector and Dropper candidates require references to observations with resolved content evidence. Memory snapshots require matching observation records and resolvable reflection support. Missing journals, invalid ancestry, missing evidence, and ambiguous native identities exclude affected records and their dependent states.
+
+All four relevance levels remain unchanged. There is no filter for low relevance, conversational wording, or session length. Large sessions remain useful sources for reflection and drop behavior.
+
+Deduplication removes only identical native observation records in the same source archive and branch. Repeated text with different evidence or a different branch remains distinct. Exclusions preserve links to retained duplicate records. Pi V3 dependency resolution follows whole-batch validation and first-valid-record-wins before checking content evidence. Legacy identity aliases with conflicting values are not treated as interchangeable.
+
+The view contains `memory-candidates.jsonl`, `sessions.jsonl`, `eligibility.jsonl`, `exclusions.jsonl`, a report, and the curator code used. Its manifest pins the upstream manifest hash. Native archive references resolve in the upstream collection, so retain both directories. Validation verifies the complete upstream partition, original record equality, evidence proofs, and exclusion decisions. The view's `.gitignore` also protects custom output locations.
+
+### Agent definitions and teacher inputs
+
+The corpus preserves native memory records and normalized argument fields. It does **not** yet contain a production prompt/tool bundle or complete historical memory-agent requests and receipts. The proposal's schemas and synthetic tool fixture are not byte-exact production definitions.
+
+The teacher harness must export and pin the production Observer, Reflector, and Dropper instructions, tool names, descriptions, parameter schemas, and handler behavior. Pi-derived training examples use the Hatfield target contract. Historical Pi tool fields remain native provenance rather than being mixed into that contract.
+
+Give teacher and student the same permitted source content, visible memory pool, instructions, tools, and limits. Do not add a separate style-cleaning policy. Generate fresh actions under those definitions and obtain receipts from isolated runtime handlers. Exact historical requests can only be reused when they were captured or can be proven reconstructable; an OM ledger entry alone is not that proof.
+
 ## Verify a collection
 
 ```bash
@@ -96,9 +122,9 @@ All histories remain in the archive, including sessions without OM outputs and r
 
 ## Next stages
 
-1. Establish lineage groups and duplicate checks, then freeze train, validation, and test assignments before labeling.
-2. Construct causal Hatfield-contract invocations from the frozen sources. Preserve raw evidence separately from model-visible evidence and classify reconstruction fidelity.
-3. Before remote labeling, check provider permissions and the data that may leave the machine. Local unredacted collection does not authorize sending secrets to a provider.
-4. Run the selected teacher, validate actions through isolated Hatfield handlers, and review labels before exporting training examples.
+1. Establish lineage groups and invocation-level duplicate checks on the OM-only view, then freeze train, validation, and test assignments before labeling. Grouping prevents shared histories from entering both training and evaluation; it does not exclude long sessions.
+2. Export the pinned production agent definitions and tools. Construct causal Hatfield-contract invocations from the selected sources, preserving raw evidence separately from model-visible evidence and classifying reconstruction fidelity.
+3. Implement the isolated teacher tool loop for Observer, Reflector, and Dropper. Before remote labeling, check provider permissions and the data that may leave the machine. Local unredacted collection does not authorize sending secrets to a provider.
+4. Run the selected teacher with the same input and contract as the student. Validate actions through isolated Hatfield handlers and review labels before exporting training examples.
 
 The design remains in [`hatfield-om-dataset-spec/OM-DATA-01.md`](hatfield-om-dataset-spec/OM-DATA-01.md). Model compatibility, token counts, family counts, and training readiness are not measured by this collector.

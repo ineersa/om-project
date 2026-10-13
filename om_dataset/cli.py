@@ -7,6 +7,7 @@ import sys
 from pathlib import Path
 
 from .collection import collect, discover, inventory, normalize_collection, validate_collection
+from .curation import curate_collection, validate_curated_collection
 
 
 def parser() -> argparse.ArgumentParser:
@@ -29,6 +30,9 @@ def parser() -> argparse.ArgumentParser:
     normalization = commands.add_parser("normalize", help="Reparse an existing frozen corpus, not live sources.")
     normalization.add_argument("collection", type=Path)
     normalization.add_argument("--output", type=Path, required=True)
+    curation = commands.add_parser("curate", help="Select OM-bearing sessions with resolved content evidence.")
+    curation.add_argument("collection", type=Path)
+    curation.add_argument("--output", type=Path, required=True)
     return result
 
 
@@ -36,9 +40,14 @@ def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
         if args.command == "validate":
-            report = validate_collection(args.collection)
+            manifest = json.loads((args.collection.expanduser() / "manifest.json").read_text())
+            report = (validate_curated_collection(args.collection)
+                      if manifest.get("schema_version") == "om-curated-corpus/1"
+                      else validate_collection(args.collection))
         elif args.command == "normalize":
             report = normalize_collection(args.collection, args.output)
+        elif args.command == "curate":
+            report = curate_collection(args.collection, args.output)
         else:
             if args.command == "collect" and args.resume:
                 sources = json.loads((args.output.expanduser() / "collection-config.json").read_text())["sources"]
