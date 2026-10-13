@@ -1,0 +1,73 @@
+[
+  {
+    "type": "function",
+    "function": {
+      "name": "record_observations",
+      "description": "Synthetic fixture: record new observations and return a progress receipt.",
+      "parameters": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "observations": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "timestamp": {
+                  "type": "string",
+                  "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$"
+                },
+                "content": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "relevance": {
+                  "type": "string",
+                  "enum": [
+                    "low",
+                    "medium",
+                    "high",
+                    "critical"
+                  ]
+                },
+                "source_refs": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "properties": {
+                      "run_id": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "seq": {
+                        "type": "integer",
+                        "minimum": 1
+                      }
+                    },
+                    "required": [
+                      "run_id",
+                      "seq"
+                    ]
+                  },
+                  "minItems": 1
+                }
+              },
+              "required": [
+                "timestamp",
+                "content",
+                "relevance",
+                "source_refs"
+              ]
+            },
+            "minItems": 0
+          }
+        },
+        "required": [
+          "observations"
+        ]
+      }
+    }
+  }
+]

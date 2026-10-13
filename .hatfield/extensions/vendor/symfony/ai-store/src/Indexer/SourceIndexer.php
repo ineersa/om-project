@@ -1,0 +1,60 @@
+<?php
+
+/*
+ * This file is part of the Symfony package.
+ *
+ * (c) Fabien Potencier <fabien@symfony.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace Symfony\AI\Store\Indexer;
+
+use Symfony\AI\Store\Document\LoaderInterface;
+use Symfony\AI\Store\Exception\InvalidArgumentException;
+use Symfony\AI\Store\IndexerInterface;
+
+/**
+ * Indexer that loads documents from sources (file paths, URLs, etc.) and processes them.
+ *
+ * @author Christopher Hertel <mail@christopher-hertel.de>
+ */
+final class SourceIndexer implements IndexerInterface
+{
+    public function __construct(
+        private LoaderInterface $loader,
+        private DocumentProcessor $processor,
+    ) {
+    }
+
+    /**
+     * @param string|iterable<string>|null $input   Source identifier (file path, URL, etc.), iterable of sources, or null for source-independent loaders
+     * @param array<string, mixed>         $options passed to the loader as well as to the processor, so a source can be narrowed at runtime
+     */
+    public function index(string|iterable|object|null $input = null, array $options = []): void
+    {
+        if (null === $input) {
+            $this->processor->process($this->loader->load(null, $options), $options);
+
+            return;
+        }
+
+        if (\is_object($input) && !$input instanceof \Traversable) {
+            throw new InvalidArgumentException(\sprintf('SourceIndexer expects a string or iterable of strings, got "%s".', $input::class));
+        }
+
+        $sources = \is_string($input) ? [$input] : $input;
+
+        $documents = (function () use ($sources, $options) {
+            foreach ($sources as $source) {
+                if (!\is_string($source)) {
+                    throw new InvalidArgumentException(\sprintf('SourceIndexer expects sources to be strings, got "%s".', get_debug_type($source)));
+                }
+                yield from $this->loader->load($source, $options);
+            }
+        })();
+
+        $this->processor->process($documents, $options);
+    }
+}

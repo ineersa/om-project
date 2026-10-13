@@ -1,0 +1,30 @@
+{
+  "id_namespace": "fixture_only",
+  "observations": [
+    {
+      "observation_id": "dd8202aea759aa4ae640bca34b43721993a4c5783f90da15a6554c72dcafe819",
+      "timestamp": "2026-10-01 09:00",
+      "content": "User prohibited merging the PR until they give separate approval.",
+      "relevance": "critical",
+      "source_refs": [
+        {
+          "run_id": "run-example",
+          "seq": 101
+        }
+      ]
+    },
+    {
+      "observation_id": "8874fad8a2d64ed67f154720bb0fe57ca7725d2043f0a40afed0f514f6301de4",
+      "timestamp": "2026-10-01 09:02",
+      "content": "Assistant suspected that an acknowledgement arriving after the timeout causes the shutdown hang; the hypothesis was unverified.",
+      "relevance": "medium",
+      "source_refs": [
+        {
+          "run_id": "run-example",
+          "seq": 102
+        }
+      ]
+    }
+  ],
+  "reflections": []
+}

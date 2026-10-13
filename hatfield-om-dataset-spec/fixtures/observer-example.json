@@ -1,0 +1,294 @@
+{
+  "schema_version": "om-dataset/v0.1",
+  "record_kind": "fixture",
+  "example_id": "e5bb50eb6bde61264084971fb58bc867e8ab84bf3d9531deb9ceff5c06dc82c7",
+  "task": "observer",
+  "split": "unassigned",
+  "lineage": {
+    "group_id": "fixture-group-1",
+    "root_session_id": "fixture-session-1",
+    "parent_example_id": null,
+    "shared_prefix_ids": []
+  },
+  "origin": {
+    "platform": "synthetic",
+    "source_session_id": "fixture-session-1",
+    "source_run_id": "run-example",
+    "code_revision": "fixture-engine-v1",
+    "construction": "fresh_replay",
+    "history_track": "teacher_clean",
+    "source_artifacts": [
+      {
+        "path": "fixtures/blobs/synthetic-source.txt",
+        "sha256": "c706de23bbbe6e4e185f7148a7987a75641f2dc8265a4cfd7a4da21cb1232672"
+      }
+    ],
+    "native_config_ref": null
+  },
+  "policy": {
+    "prompt_ref": {
+      "path": "fixtures/blobs/fixture-policy.txt",
+      "sha256": "6f50e851388f3c9d80fbb51239b20194f4d478b71b3f01eb798ce6778d2cf397"
+    },
+    "tools_ref": {
+      "path": "fixtures/blobs/fixture-tools.json",
+      "sha256": "d9c524bf700885c370ca861407d0781353f7f2acb472659ea56b9588309498ac"
+    },
+    "renderer_version": "fixture-renderer-v1",
+    "target_runtime_revision": "fixture-engine-v1",
+    "serialization_policy": "canonical-json-tools-v1"
+  },
+  "boundary": {
+    "source_start_seq": 101,
+    "source_end_seq": 102,
+    "part_index": 1,
+    "part_count": 1,
+    "source_cutoff_id": "run-example:102",
+    "call_time": "2026-10-01T09:05:00Z",
+    "timezone": "UTC",
+    "availability_basis": "deterministic_replay"
+  },
+  "limits": {
+    "context_tokens": null,
+    "input_envelope_tokens": null,
+    "max_output_tokens": null,
+    "max_tool_calls": 6,
+    "reasoning_mode": "fixture-not-executed",
+    "memory_pool_target_tokens": null,
+    "max_drops_allowed": null
+  },
+  "input": {
+    "messages": [
+      {
+        "role": "system",
+        "content": "Synthetic Observer fixture policy. Record new supported facts by calling record_observations. Preserve scope and uncertainty; never upgrade a hypothesis to a verified result. Use the printed source references and message timestamps. After the tool receipt, finish with a brief confirmation. If no new useful fact exists, finish without a tool call."
+      },
+      {
+        "role": "user",
+        "content": "CURRENT REFLECTIONS:\n(none yet)\n\nCURRENT OBSERVATIONS:\n(none yet)\n\nNEW SOURCE-ADDRESSED CONVERSATION CHUNK:\n[Source entry id: run-example:101]\n[User @ 2026-10-01 09:00]: Do not merge this PR; I will approve the merge separately.\n\n[Source entry id: run-example:102]\n[Assistant @ 2026-10-01 09:02]: I suspect shutdown hangs because the acknowledgement arrives after the timeout. I have not verified this.\n\nCurrent local time fallback: 2026-10-01 09:05"
+      }
+    ],
+    "tools": [
+      {
+        "type": "function",
+        "function": {
+          "name": "record_observations",
+          "description": "Synthetic fixture: record new observations and return a progress receipt.",
+          "parameters": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "observations": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "timestamp": {
+                      "type": "string",
+                      "pattern": "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}$"
+                    },
+                    "content": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "relevance": {
+                      "type": "string",
+                      "enum": [
+                        "low",
+                        "medium",
+                        "high",
+                        "critical"
+                      ]
+                    },
+                    "source_refs": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "additionalProperties": false,
+                        "properties": {
+                          "run_id": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "seq": {
+                            "type": "integer",
+                            "minimum": 1
+                          }
+                        },
+                        "required": [
+                          "run_id",
+                          "seq"
+                        ]
+                      },
+                      "minItems": 1
+                    }
+                  },
+                  "required": [
+                    "timestamp",
+                    "content",
+                    "relevance",
+                    "source_refs"
+                  ]
+                },
+                "minItems": 0
+              }
+            },
+            "required": [
+              "observations"
+            ]
+          }
+        }
+      }
+    ],
+    "visible_source_blocks": [
+      {
+        "block_id": "block-101",
+        "artifact": {
+          "path": "fixtures/blobs/block-101.txt",
+          "sha256": "8a7c2ff4198d70219e898876e88ce680985a5b7a85620ab344e4c7f1bedfb7dd"
+        },
+        "source_refs": [
+          {
+            "run_id": "run-example",
+            "seq": 101
+          }
+        ]
+      },
+      {
+        "block_id": "block-102",
+        "artifact": {
+          "path": "fixtures/blobs/block-102.txt",
+          "sha256": "4e3750cd9f506ec34a369dcf84287c567627240fc8d4dcf3549c5d9c4006d54f"
+        },
+        "source_refs": [
+          {
+            "run_id": "run-example",
+            "seq": 102
+          }
+        ]
+      }
+    ],
+    "allowed_source_refs": [
+      {
+        "run_id": "run-example",
+        "seq": 101
+      },
+      {
+        "run_id": "run-example",
+        "seq": 102
+      }
+    ],
+    "request_local_observation_ids": {},
+    "state_before_ref": {
+      "path": "fixtures/blobs/state-before.json",
+      "sha256": "cec451e96ecdfb73bee435d11db72820a7433a756b268f71bdbe9c0e5ca0f478"
+    }
+  },
+  "target": {
+    "messages": [
+      {
+        "role": "assistant",
+        "content": null,
+        "tool_calls": [
+          {
+            "id": "fixture-call-1",
+            "type": "function",
+            "function": {
+              "name": "record_observations",
+              "arguments": {
+                "observations": [
+                  {
+                    "timestamp": "2026-10-01 09:00",
+                    "content": "User prohibited merging the PR until they give separate approval.",
+                    "relevance": "critical",
+                    "source_refs": [
+                      {
+                        "run_id": "run-example",
+                        "seq": 101
+                      }
+                    ]
+                  },
+                  {
+                    "timestamp": "2026-10-01 09:02",
+                    "content": "Assistant suspected that an acknowledgement arriving after the timeout causes the shutdown hang; the hypothesis was unverified.",
+                    "relevance": "medium",
+                    "source_refs": [
+                      {
+                        "run_id": "run-example",
+                        "seq": 102
+                      }
+                    ]
+                  }
+                ]
+              }
+            }
+          }
+        ]
+      },
+      {
+        "role": "tool",
+        "name": "record_observations",
+        "tool_call_id": "fixture-call-1",
+        "content": "{\"status\":\"accepted\",\"added\":2,\"duplicates\":0,\"rejected\":0,\"total\":2,\"message\":\"Observations accepted. Continue if uncovered content remains; stop when the chunk is fully covered.\"}"
+      },
+      {
+        "role": "assistant",
+        "content": "Observation pass complete."
+      }
+    ],
+    "accepted_delta": {
+      "observations": [
+        {
+          "observation_id": "dd8202aea759aa4ae640bca34b43721993a4c5783f90da15a6554c72dcafe819",
+          "timestamp": "2026-10-01 09:00",
+          "content": "User prohibited merging the PR until they give separate approval.",
+          "relevance": "critical",
+          "source_refs": [
+            {
+              "run_id": "run-example",
+              "seq": 101
+            }
+          ]
+        },
+        {
+          "observation_id": "8874fad8a2d64ed67f154720bb0fe57ca7725d2043f0a40afed0f514f6301de4",
+          "timestamp": "2026-10-01 09:02",
+          "content": "Assistant suspected that an acknowledgement arriving after the timeout causes the shutdown hang; the hypothesis was unverified.",
+          "relevance": "medium",
+          "source_refs": [
+            {
+              "run_id": "run-example",
+              "seq": 102
+            }
+          ]
+        }
+      ],
+      "reflections": [],
+      "dropped_observation_ids": []
+    },
+    "state_after_ref": {
+      "path": "fixtures/blobs/state-after.json",
+      "sha256": "8400fee9603c07950cd241d2380cd6b67767f1e9e5b6dbcc15ef67ff9ee7af09"
+    }
+  },
+  "historical_output_ref": null,
+  "annotations_ref": {
+    "path": "fixtures/blobs/annotations.json",
+    "sha256": "3fe26203e08c50dff424fc6929955d33efcb56805579f2f507c177c4cdcef6a2"
+  },
+  "quality": {
+    "status": "fixture",
+    "hard_checks_passed": true,
+    "checked_input_hash": "15fc8e66a378b3e93f8d4876b6cf45e7311631fb9fdd321a0cd54a3f48ecdc2d",
+    "judge_records": [],
+    "human_adjudication_ref": null
+  },
+  "token_counts": {
+    "runtime_input_estimate": null,
+    "model_id": null,
+    "tokenizer_revision": null,
+    "input_tokens": null,
+    "target_tokens": null
+  }
+}

@@ -1,0 +1,11 @@
+# Hatfield runtime data. Project settings and other custom files remain trackable.
+sessions/
+tmp/
+cache/
+cache-*/
+logs/
+extensions-data/
+rewind/
+state.sqlite*
+messenger-transport.sqlite*
+messenger.sqlite*

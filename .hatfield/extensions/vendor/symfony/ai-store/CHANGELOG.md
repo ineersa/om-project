@@ -1,0 +1,80 @@
+CHANGELOG
+=========
+
+0.14
+----
+
+ * `Indexer\SourceIndexer` now passes its options to the loader as well as to the document processor
+ * [BC BREAK] Accept and return `Platform\Vector\VectorInterface` in `Query\VectorQuery` and `Query\HybridQuery` instead of the final `Platform\Vector\Vector` class
+ * [BC BREAK] Type stores, retrievers, rerankers and vectorizers against the new `Document\VectorDocumentInterface` instead of the final `Document\VectorDocument` class
+ * [BC BREAK] Add `count` method to `StoreInterface`, which now extends `\Countable`
+
+
+
+0.11
+----
+
+ * [BC BREAK] Add `StoreInterface::clear()` method to remove all documents from a store while keeping table, index or collection intact
+ * Add `ai:store:clear` command to remove all documents from a store
+ * Add `DirectoryLoader` that scans a directory and delegates each file to a per-extension sub-loader, with optional recursion
+ * `Vectorizer` now always sends a single batched `Platform::invoke()` call when vectorizing multiple strings or documents, instead of consulting the model catalog and falling back to one call per item
+
+0.9
+---
+
+ * Add `maxDepth` constructor parameter to `RstToctreeLoader` to limit toctree recursion depth
+
+0.8
+---
+
+ * [BC BREAK] Change `public array $calls` to `private array $calls` in `TraceableStore` - use `getCalls()` instead
+
+0.7
+---
+
+ * Add `TraceableStore` profiler decorator moved from AI Bundle
+ * Add `RstLoader` and `RstToctreeLoader` for loading RST files and following toctree directives
+ * Add pre-query event dispatching for query enhancement before vectorization
+ * Add platform-based `Reranker` for cross-encoder reranking via `PlatformInterface`
+ * Add `CombinedStore` combining vector and text stores with Reciprocal Rank Fusion (RRF)
+ * [BC BREAK] Add `?EventDispatcherInterface $eventDispatcher` as 3rd constructor parameter of `Retriever` (before `$logger`)
+ * Add automatic text content preservation in `Vectorizer` metadata
+ * Add batch processing in `DistanceCalculator` for local vector stores
+
+0.6
+---
+
+ * Add `SummaryGeneratorTransformer` for generating LLM-based summaries of documents
+
+0.4
+---
+
+ * Add `CsvLoader` for loading documents from CSV files
+ * Add `StoreInterface::remove()` method
+ * Add `SourceIndexer` for indexing from sources (file paths, URLs, etc.) using a `LoaderInterface`
+ * Add `DocumentIndexer` for indexing documents directly without a loader
+ * Add `ConfiguredSourceIndexer` decorator for pre-configuring default sources on `SourceIndexer`
+ * [BC BREAK] Remove `Indexer` class - use `SourceIndexer` or `DocumentIndexer` instead
+ * [BC BREAK] Change `IndexerInterface::index()` signature - input parameter is no longer nullable
+ * [BC BREAK] Remove `Uuid` as possible type for `TextDocument::id` and `VectorDocument::id`, use `string` or `int` instead
+ * [BC BREAK] `Symfony\AI\Store\Document\EmbeddableDocumentInterface::getId()` now returns `string|int` instead of `mixed`
+ * [BC BREAK] Reduce visibility of `VectorDocument` and `RssItem` properties to `private` and add getters
+ * Add `MarkdownLoader`
+ * Add `JsonFileLoader`
+ * Add `ResetInterface` support to in-memory store
+
+0.3
+---
+
+ * Add support for more types (`int`, `string`) on `VectorDocument` and `TextDocument`
+ * [BC BREAK] Store Bridges don't auto-cast the document `$id` property to `uuid` anymore
+
+0.2
+---
+
+ * [BC BREAK] Change `StoreInterface::add()` from variadic to accept array and `VectorDocument`
+
+0.1
+---
+
+ * Add the component

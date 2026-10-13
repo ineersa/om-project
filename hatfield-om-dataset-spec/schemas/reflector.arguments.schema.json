@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Reflector structural action arguments — OM-DATA-01 v0.1",
+  "description": "Derived validation shape, not a byte-identical production tool definition. Referential integrity, calendar validity, single-line prose, and semantics require separate validation.",
+  "type": "object",
+  "additionalProperties": false,
+  "properties": {
+    "reflections": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "properties": {
+          "content": {
+            "type": "string",
+            "minLength": 1
+          },
+          "supporting_observation_ids": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "minLength": 1
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "content",
+          "supporting_observation_ids"
+        ]
+      },
+      "minItems": 1
+    }
+  },
+  "required": [
+    "reflections"
+  ]
+}

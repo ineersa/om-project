@@ -1,0 +1,68 @@
+{
+  "name": "helgesverre/toon",
+  "description": "Token-Oriented Object Notation - A compact data format for reducing token consumption when sending structured data to LLMs",
+  "type": "library",
+  "license": "MIT",
+  "keywords": [
+    "llm",
+    "token",
+    "compression",
+    "ai",
+    "format",
+    "serialization",
+    "openai",
+    "anthropic",
+    "claude",
+    "gpt",
+    "laravel",
+    "optimization",
+    "prompt",
+    "cost-reduction"
+  ],
+  "authors": [
+    {
+      "name": "Helge Sverre",
+      "email": "helge.sverre@gmail.com"
+    }
+  ],
+  "require": {
+    "php": "^8.1"
+  },
+  "require-dev": {
+    "phpunit/phpunit": "^10.0",
+    "phpstan/phpstan": "^1.10",
+    "laravel/pint": "1.20.0",
+    "phpbench/phpbench": "^1.4",
+    "infection/infection": "*"
+  },
+  "autoload": {
+    "psr-4": {
+      "HelgeSverre\\Toon\\": "src/"
+    },
+    "files": [
+      "src/helpers.php"
+    ]
+  },
+  "autoload-dev": {
+    "psr-4": {
+      "HelgeSverre\\Toon\\Tests\\": "tests/"
+    }
+  },
+  "minimum-stability": "stable",
+  "prefer-stable": true,
+  "scripts": {
+    "test": "vendor/bin/phpunit --no-coverage",
+    "coverage": "vendor/bin/phpunit --coverage-html coverage",
+    "coverage:herd": "herd coverage vendor/bin/phpunit --coverage-html coverage",
+    "format": "vendor/bin/pint src tests",
+    "lint": "vendor/bin/pint src tests --test",
+    "analyse": "phpstan analyse",
+    "pint": "@format",
+    "analyze": "@analyse"
+  },
+  "config": {
+    "allow-plugins": {
+      "infection/extension-installer": true
+    }
+  }
+}

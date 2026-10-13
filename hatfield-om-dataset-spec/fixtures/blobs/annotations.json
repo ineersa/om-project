@@ -1,0 +1,43 @@
+{
+  "fixture_only": true,
+  "no_op_reason": null,
+  "facts": [
+    {
+      "fact_id": "f-approval",
+      "required_in_delta": true,
+      "importance": "critical",
+      "claim": "Merging this PR requires separate user approval.",
+      "epistemic_status": "explicit_constraint",
+      "evidence": [
+        {
+          "block_id": "block-101",
+          "run_id": "run-example",
+          "seq": 101,
+          "visible_span": "Do not merge this PR; I will approve the merge separately."
+        }
+      ],
+      "prohibited_inferences": [
+        "The user forbids all future PR merges."
+      ]
+    },
+    {
+      "fact_id": "f-hypothesis",
+      "required_in_delta": true,
+      "importance": "medium",
+      "claim": "The assistant suspected a late-acknowledgement shutdown cause but had not verified it.",
+      "epistemic_status": "assistant_hypothesis",
+      "evidence": [
+        {
+          "block_id": "block-102",
+          "run_id": "run-example",
+          "seq": 102,
+          "visible_span": "I suspect shutdown hangs because the acknowledgement arrives after the timeout. I have not verified this."
+        }
+      ],
+      "prohibited_inferences": [
+        "The shutdown root cause was confirmed.",
+        "The shutdown bug was fixed."
+      ]
+    }
+  ]
+}

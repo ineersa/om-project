@@ -1,0 +1,5 @@
+[Source entry id: run-example:101]
+[User @ 2026-10-01 09:00]: Do not merge this PR; I will approve the merge separately.
+
+[Source entry id: run-example:102]
+[Assistant @ 2026-10-01 09:02]: I suspect shutdown hangs because the acknowledgement arrives after the timeout. I have not verified this.

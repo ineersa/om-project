@@ -1,0 +1,8 @@
+{
+    "require": {
+        "ineersa/hatfield-ext-observational-memory": "^0.0.38"
+    },
+    "config": {
+        "prepend-autoloader": false
+    }
+}

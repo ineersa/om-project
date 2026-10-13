@@ -1,0 +1,58 @@
+<?php
+
+/*
+ * This file is part of the Symfony package.
+ *
+ * (c) Fabien Potencier <fabien@symfony.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace Symfony\AI\Store\Document\Transformer;
+
+use Psr\Log\LoggerInterface;
+use Psr\Log\NullLogger;
+use Symfony\AI\Store\Document\TransformerInterface;
+use Symfony\Component\Clock\ClockInterface;
+
+/**
+ * This transformer splits the batch of documents into chunks and delays in-between with x seconds, which is useful
+ * when indexing a lot of documents and facing API rate limits.
+ *
+ * @author Christopher Hertel <mail@christopher-hertel.de>
+ */
+final class ChunkDelayTransformer implements TransformerInterface
+{
+    public const OPTION_CHUNK_SIZE = 'chunk_size';
+    public const OPTION_DELAY = 'delay';
+
+    public function __construct(
+        private readonly ClockInterface $clock,
+        private readonly int $chunkSize = 50,
+        private readonly int $delay = 10,
+        private readonly LoggerInterface $logger = new NullLogger(),
+    ) {
+    }
+
+    /**
+     * @param array{chunk_size?: int, delay?: int} $options
+     */
+    public function transform(iterable $documents, array $options = []): iterable
+    {
+        $chunkSize = $options[self::OPTION_CHUNK_SIZE] ?? $this->chunkSize;
+        $delay = $options[self::OPTION_DELAY] ?? $this->delay;
+
+        $counter = 0;
+        foreach ($documents as $document) {
+            if ($chunkSize === $counter && 0 !== $delay) {
+                $this->logger->info(\sprintf('Processed %d documents, sleeping for %d seconds to avoid rate limits...', $counter, $delay));
+                $this->clock->sleep($delay);
+                $counter = 0;
+            }
+
+            yield $document;
+            ++$counter;
+        }
+    }
+}

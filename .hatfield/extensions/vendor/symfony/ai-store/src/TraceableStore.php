@@ -1,0 +1,132 @@
+<?php
+
+/*
+ * This file is part of the Symfony package.
+ *
+ * (c) Fabien Potencier <fabien@symfony.com>
+ *
+ * For the full copyright and license information, please view the LICENSE
+ * file that was distributed with this source code.
+ */
+
+namespace Symfony\AI\Store;
+
+use Symfony\AI\Store\Document\VectorDocumentInterface;
+use Symfony\AI\Store\Query\QueryInterface;
+use Symfony\Component\Clock\ClockInterface;
+use Symfony\Component\Clock\MonotonicClock;
+use Symfony\Contracts\Service\ResetInterface;
+
+/**
+ * @author Guillaume Loulier <personal@guillaumeloulier.fr>
+ *
+ * @phpstan-type StoreData array{
+ *     method: string,
+ *     documents?: VectorDocumentInterface|VectorDocumentInterface[],
+ *     query?: QueryInterface,
+ *     ids?: string[]|string,
+ *     options?: array<string, mixed>,
+ *     called_at: \DateTimeImmutable,
+ * }
+ */
+final class TraceableStore implements StoreInterface, ManagedStoreInterface, ResetInterface
+{
+    /**
+     * @var StoreData[]
+     */
+    private array $calls = [];
+
+    public function __construct(
+        private readonly StoreInterface $store,
+        private readonly ClockInterface $clock = new MonotonicClock(),
+    ) {
+    }
+
+    public function setup(array $options = []): void
+    {
+        if ($this->store instanceof ManagedStoreInterface) {
+            $this->store->setup($options);
+        }
+    }
+
+    public function getDecoratedStore(): StoreInterface
+    {
+        return $this->store;
+    }
+
+    public function add(VectorDocumentInterface|array $documents): void
+    {
+        $this->calls[] = [
+            'method' => 'add',
+            'documents' => $documents,
+            'called_at' => $this->clock->now(),
+        ];
+
+        $this->store->add($documents);
+    }
+
+    public function query(QueryInterface $query, array $options = []): iterable
+    {
+        $this->calls[] = [
+            'method' => 'query',
+            'query' => $query,
+            'options' => $options,
+            'called_at' => $this->clock->now(),
+        ];
+
+        return $this->store->query($query, $options);
+    }
+
+    public function remove(array|string $ids, array $options = []): void
+    {
+        $this->calls[] = [
+            'method' => 'remove',
+            'ids' => $ids,
+            'options' => $options,
+            'called_at' => $this->clock->now(),
+        ];
+
+        $this->store->remove($ids, $options);
+    }
+
+    public function clear(array $options = []): void
+    {
+        $this->calls[] = [
+            'method' => 'clear',
+            'options' => $options,
+            'called_at' => $this->clock->now(),
+        ];
+
+        $this->store->clear($options);
+    }
+
+    public function supports(string $queryClass): bool
+    {
+        return $this->store->supports($queryClass);
+    }
+
+    public function count(): int
+    {
+        return $this->store->count();
+    }
+
+    public function drop(array $options = []): void
+    {
+        if ($this->store instanceof ManagedStoreInterface) {
+            $this->store->drop($options);
+        }
+    }
+
+    /**
+     * @return StoreData[]
+     */
+    public function getCalls(): array
+    {
+        return $this->calls;
+    }
+
+    public function reset(): void
+    {
+        $this->calls = [];
+    }
+}

@@ -1,0 +1,3 @@
+PASS: draft schema, 8 artifact references, hashes, and synthetic Observer trace.
+PASS: empty-array task contracts and unknown-source-reference negative check.
+Not checked: actual Hatfield execution, model compatibility, tokenization, semantic quality, or a real corpus.

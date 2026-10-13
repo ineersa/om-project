@@ -1,0 +1,17 @@
+# Dependencies & Data
+vendor/
+data/*.bin
+data/*.lock
+.DS_Store
+.phpunit.*
+.env
+
+# Editors
+.vscode/
+.idea/
+*.sublime-workspace
+
+# LLM / AI
+.cursorrules/
+.windsurfrules/
+.agent/

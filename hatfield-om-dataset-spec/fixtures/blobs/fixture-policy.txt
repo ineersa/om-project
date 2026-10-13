@@ -1,0 +1,1 @@
+Synthetic Observer fixture policy. Record new supported facts by calling record_observations. Preserve scope and uncertainty; never upgrade a hypothesis to a verified result. Use the printed source references and message timestamps. After the tool receipt, finish with a brief confirmation. If no new useful fact exists, finish without a tool call.

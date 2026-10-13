@@ -1,0 +1,2 @@
+[Source entry id: run-example:102]
+[Assistant @ 2026-10-01 09:02]: I suspect shutdown hangs because the acknowledgement arrives after the timeout. I have not verified this.

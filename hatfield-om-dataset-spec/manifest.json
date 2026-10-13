@@ -1,0 +1,100 @@
+{
+  "package": "OM-DATA-01 specification package",
+  "version": "0.1",
+  "research_date": "2026-10-13",
+  "status": "proposed",
+  "contains_real_session_data": false,
+  "contains_implemented_generator": false,
+  "runtime_handlers_executed": false,
+  "inspected_revisions": {
+    "ineersa/agent-core": "5ea2fd920d04eccee75094afe033302c5596393c",
+    "ineersa/pi-observational-memory": "58f05fa0a857bc4fcd3dda0b3e845e8bfe069adf"
+  },
+  "files": [
+    {
+      "path": "OM-DATA-01.md",
+      "bytes": 57624,
+      "sha256": "c1c126578dc5fbd925c6f95dc941a873f51274e5a7d003952a2476918ddb7edc"
+    },
+    {
+      "path": "README.md",
+      "bytes": 1514,
+      "sha256": "bafb753e687428018bff15fe25a0ed94b18ffe33ad1a3899e85d1d33c4fbf10a"
+    },
+    {
+      "path": "example.schema.json",
+      "bytes": 33559,
+      "sha256": "9b4aeff4aa50a940055bfceded9d72cdaaffb1ad44567c5680437b29f808ebef"
+    },
+    {
+      "path": "fixtures/blobs/annotations.json",
+      "bytes": 1279,
+      "sha256": "3fe26203e08c50dff424fc6929955d33efcb56805579f2f507c177c4cdcef6a2"
+    },
+    {
+      "path": "fixtures/blobs/block-101.txt",
+      "bytes": 120,
+      "sha256": "8a7c2ff4198d70219e898876e88ce680985a5b7a85620ab344e4c7f1bedfb7dd"
+    },
+    {
+      "path": "fixtures/blobs/block-102.txt",
+      "bytes": 172,
+      "sha256": "4e3750cd9f506ec34a369dcf84287c567627240fc8d4dcf3549c5d9c4006d54f"
+    },
+    {
+      "path": "fixtures/blobs/fixture-policy.txt",
+      "bytes": 348,
+      "sha256": "6f50e851388f3c9d80fbb51239b20194f4d478b71b3f01eb798ce6778d2cf397"
+    },
+    {
+      "path": "fixtures/blobs/fixture-tools.json",
+      "bytes": 2036,
+      "sha256": "d9c524bf700885c370ca861407d0781353f7f2acb472659ea56b9588309498ac"
+    },
+    {
+      "path": "fixtures/blobs/state-after.json",
+      "bytes": 878,
+      "sha256": "8400fee9603c07950cd241d2380cd6b67767f1e9e5b6dbcc15ef67ff9ee7af09"
+    },
+    {
+      "path": "fixtures/blobs/state-before.json",
+      "bytes": 80,
+      "sha256": "cec451e96ecdfb73bee435d11db72820a7433a756b268f71bdbe9c0e5ca0f478"
+    },
+    {
+      "path": "fixtures/blobs/synthetic-source.txt",
+      "bytes": 295,
+      "sha256": "c706de23bbbe6e4e185f7148a7987a75641f2dc8265a4cfd7a4da21cb1232672"
+    },
+    {
+      "path": "fixtures/observer-example.json",
+      "bytes": 9799,
+      "sha256": "e127703472a8abd61367bd033652cce1d3a6a1e5d3ff8badbb3b08a4653e66b2"
+    },
+    {
+      "path": "schemas/dropper.arguments.schema.json",
+      "bytes": 623,
+      "sha256": "1b1bd1076cde5b6fdb85cde043db8078a62492cb6c8bbd1a791c3d9140c391e9"
+    },
+    {
+      "path": "schemas/observer.arguments.schema.json",
+      "bytes": 1774,
+      "sha256": "d95b6f54f8e720e58c356a2bf2abe8959d8126e29ca46f5c4ed3ba797c3d8015"
+    },
+    {
+      "path": "schemas/reflector.arguments.schema.json",
+      "bytes": 1039,
+      "sha256": "abc64a6b023910d4c2b7a731cefb15ef84368349d36a34d94f6bc7a20286e69b"
+    },
+    {
+      "path": "validate_fixture.py",
+      "bytes": 8622,
+      "sha256": "483c57553933f360eba54f805a42c9aa9cd6215a820871ae93535c685bfaf2f3"
+    },
+    {
+      "path": "validation-report.txt",
+      "bytes": 270,
+      "sha256": "2688cef9d2a4bd8e2d8953e71093aac47642a3c3425dbed3b045522db6ff11f1"
+    }
+  ]
+}

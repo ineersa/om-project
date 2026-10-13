@@ -1,0 +1,54 @@
+name: Release Builder
+
+on:
+  push:
+    branches:
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Release Zip
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          tools: composer:v2
+
+      - name: Install Dependencies
+        run: composer install --no-dev --optimize-autoloader --prefer-dist --no-interaction
+
+      - name: Get version from composer.json
+        id: get_version
+        run: |
+          echo "VERSION=$(jq -r .version composer.json)" >> $GITHUB_OUTPUT
+
+      - name: Clean Dev Files
+        run: |
+          rm -rf tests
+          rm -rf .git
+          rm -rf .github
+          rm -f phpunit.xml
+          rm -f .gitignore
+          rm -f _config.yml
+
+      - name: Create Zip Archive
+        run: |
+          zip -r "vektor-${{ steps.get_version.outputs.VERSION }}.zip" .
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ steps.get_version.outputs.VERSION }}
+          name: Release ${{ steps.get_version.outputs.VERSION }}
+          files: vektor-${{ steps.get_version.outputs.VERSION }}.zip
+          draft: false
+          prerelease: false
