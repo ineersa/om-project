@@ -76,11 +76,44 @@ The view contains `memory-candidates.jsonl`, `sessions.jsonl`, `eligibility.json
 
 ### Agent definitions and teacher inputs
 
-The corpus preserves native memory records and normalized argument fields. It does **not** yet contain a production prompt/tool bundle or complete historical memory-agent requests and receipts. The proposal's schemas and synthetic tool fixture are not byte-exact production definitions.
+The corpus preserves native memory records and normalized argument fields. The separate policy export below adds source-pinned agent instructions and worker tools. Complete historical memory-agent requests and receipts remain absent. The proposal's schemas and synthetic tool fixture are not byte-exact production definitions.
 
-The teacher harness must export and pin the production Observer, Reflector, and Dropper instructions, tool names, descriptions, parameter schemas, and handler behavior. Pi-derived training examples use the Hatfield target contract. Historical Pi tool fields remain native provenance rather than being mixed into that contract.
+Pi-derived training examples use the Hatfield target contract. Historical Pi tool fields remain native provenance rather than being mixed into that contract. The teacher harness must reuse the exported definitions and execute their pinned handlers in isolation.
 
 Give teacher and student the same permitted source content, visible memory pool, instructions, tools, and limits. Do not add a separate style-cleaning policy. Generate fresh actions under those definitions and obtain receipts from isolated runtime handlers. Exact historical requests can only be reused when they were captured or can be proven reconstructable; an OM ledger entry alone is not that proof.
+
+## Export agent policies
+
+Use a new output directory. The export requires Git, PHP with `nikic/php-parser` available through Composer, and Node with TypeScript and TypeBox installed in the selected Pi runtime repository. It reads committed sources and does not require provider credentials.
+
+```bash
+uv run python main.py export-policies data/curated-2026-10-13-v2 \
+	--hatfield-repo /home/ineersa/projects/agent-core \
+	--pi-repo /home/ineersa/claw/pi-observational-memory \
+	--pi-runtime-repo /home/ineersa/claw/pi-mono \
+	--output data/policies-2026-10-13
+uv run python main.py validate data/policies-2026-10-13
+```
+
+`--php-parser-autoload` defaults to the selected Hatfield repository's `vendor/autoload.php`. The Pi revision options accept hexadecimal commit IDs, not branch names. Hatfield uses the corpus's target revision and rejects a target other than the supported pin.
+
+### Policy bundles
+
+| Bundle | Source revision | Agents | Native output contract |
+|---|---|---|---|
+| `hatfield-target` | `5ea2fd920d04eccee75094afe033302c5596393c` | Observer, Reflector, Dropper | Hatfield worker tools. |
+| `pi-current-native` | `58f05fa0a857bc4fcd3dda0b3e845e8bfe069adf` | Observer, Reflector, Dropper | Pi worker tools with native field names. |
+| `pi-legacy-v2-reference` | `00d5975ccbb19fcdc2f5e4b04e83688ae439be10` | Observer, Reflector, Pruner | Text completions. No worker tools. |
+
+Each bundle contains `definitions.json` and its committed source files. Definitions include exact instruction strings, tool names, descriptions, parameter schemas, identities, and source ranges. The export archives input builders, runtime expressions, handlers, and supporting implementation code without executing application code. PHP literal extraction uses the parser AST. TypeScript schema extraction evaluates a restricted AST through the installed TypeBox factories. Unknown factory imports and dynamic or shadowed bindings fail extraction. The Pi-AI TypeBox re-export is verified and archived.
+
+Hatfield call options are part of the definitions: Observer permits six tool calls; Reflector and Dropper permit sixteen. Each has a 300-second request limit. Dropper sets thinking to `off`; the other agents inherit the runtime setting.
+
+The manifest pins the corpus manifest hash, source revisions, artifact hashes, and parser versions. The release also preserves the exporter and Python dependency lock. Validation runs without reopening live source repositories. It checks artifact integrity, definition identities, schema structure, source ranges, and archived source expressions. It does not execute handlers or establish semantic label quality.
+
+The historical V2 implementation is a reference, not proven attribution for the enriched `om.observation` records or version-4 snapshots. Their producer remains unresolved. Native definitions from known commits do not prove the exact requests used in historical sessions.
+
+The policy release has `training_ready: false`, `handlers_executed: false`, and zero model calls. It contains source code for dynamic input construction, not reconstructed invocation inputs. User-facing recall and search tools are outside the worker tool set.
 
 ## Verify a collection
 
@@ -123,8 +156,8 @@ All histories remain in the archive, including sessions without OM outputs and r
 ## Next stages
 
 1. Establish lineage groups and invocation-level duplicate checks on the OM-only view, then freeze train, validation, and test assignments before labeling. Grouping prevents shared histories from entering both training and evaluation; it does not exclude long sessions.
-2. Export the pinned production agent definitions and tools. Construct causal Hatfield-contract invocations from the selected sources, preserving raw evidence separately from model-visible evidence and classifying reconstruction fidelity.
-3. Implement the isolated teacher tool loop for Observer, Reflector, and Dropper. Before remote labeling, check provider permissions and the data that may leave the machine. Local unredacted collection does not authorize sending secrets to a provider.
-4. Run the selected teacher with the same input and contract as the student. Validate actions through isolated Hatfield handlers and review labels before exporting training examples.
+2. Construct causal Hatfield-contract invocations using the policy bundles, preserving raw evidence separately from model-visible evidence and classifying reconstruction fidelity. Map native memory identities into the target state and its request-local IDs.
+3. Implement isolated handlers and receipts, then separate teacher and evaluation runners that share the invocation builder and policy bundle. Test valid actions, invalid references, duplicates, no-ops, repeated calls, and drop limits without calling a provider.
+4. Before remote labeling, check provider permissions and the data that may leave the machine. Run the selected teacher with the same input and contract as the student. Validate actions through isolated Hatfield handlers and review labels before exporting training examples. Local unredacted collection does not authorize sending secrets to a provider.
 
 The design remains in [`hatfield-om-dataset-spec/OM-DATA-01.md`](hatfield-om-dataset-spec/OM-DATA-01.md). Model compatibility, token counts, family counts, and training readiness are not measured by this collector.

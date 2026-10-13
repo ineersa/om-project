@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .collection import collect, discover, inventory, normalize_collection, validate_collection
 from .curation import curate_collection, validate_curated_collection
+from .policies import PI_LEGACY_REVISION, PI_REVISION, export_policies, validate_policies
 
 
 def parser() -> argparse.ArgumentParser:
@@ -33,6 +34,16 @@ def parser() -> argparse.ArgumentParser:
     curation = commands.add_parser("curate", help="Select OM-bearing sessions with resolved content evidence.")
     curation.add_argument("collection", type=Path)
     curation.add_argument("--output", type=Path, required=True)
+    policies = commands.add_parser("export-policies", help="Export pinned agent instructions and worker tools offline.")
+    policies.add_argument("collection", type=Path)
+    policies.add_argument("--output", type=Path, required=True)
+    policies.add_argument("--hatfield-repo", type=Path, default=Path.home() / "projects/agent-core")
+    policies.add_argument("--pi-repo", type=Path, default=Path.home() / "claw/pi-observational-memory")
+    policies.add_argument("--pi-runtime-repo", type=Path, default=Path.home() / "claw/pi-mono")
+    policies.add_argument("--php-parser-autoload", type=Path,
+                          help="Composer autoload with nikic/php-parser. Defaults to Hatfield vendor/autoload.php.")
+    policies.add_argument("--pi-revision", default=PI_REVISION)
+    policies.add_argument("--pi-legacy-revision", default=PI_LEGACY_REVISION)
     return result
 
 
@@ -41,13 +52,18 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command == "validate":
             manifest = json.loads((args.collection.expanduser() / "manifest.json").read_text())
-            report = (validate_curated_collection(args.collection)
-                      if manifest.get("schema_version") == "om-curated-corpus/1"
-                      else validate_collection(args.collection))
+            validators = {"om-curated-corpus/1": validate_curated_collection,
+                          "om-agent-policies/1": validate_policies}
+            report = validators.get(manifest.get("schema_version"), validate_collection)(args.collection)
         elif args.command == "normalize":
             report = normalize_collection(args.collection, args.output)
         elif args.command == "curate":
             report = curate_collection(args.collection, args.output)
+        elif args.command == "export-policies":
+            report = export_policies(args.collection, args.output, args.hatfield_repo, args.pi_repo,
+                                     args.pi_runtime_repo,
+                                     args.php_parser_autoload or args.hatfield_repo / "vendor/autoload.php",
+                                     args.pi_revision, args.pi_legacy_revision)
         else:
             if args.command == "collect" and args.resume:
                 sources = json.loads((args.output.expanduser() / "collection-config.json").read_text())["sources"]
