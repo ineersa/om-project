@@ -1,7 +1,7 @@
 [project]
 name = "om-project"
 version = "0.1.0"
-description = "Add your description here"
+description = "Private observational-memory corpus collection"
 readme = "README.md"
 requires-python = ">=3.13"
 dependencies = [
@@ -12,3 +12,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1",
 ]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
+testpaths = ["tests"]
