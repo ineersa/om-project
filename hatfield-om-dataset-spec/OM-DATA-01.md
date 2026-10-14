@@ -533,11 +533,13 @@ inventory -> snapshot -> redact -> lineage/deduplicate -> split
           -> adjudicate -> release -> model export -> evaluate
 ```
 
-**PHP bridge:** exports current Hatfield policy/schema bundles, renders requests using pinned classes, runs isolated memory handlers, and projects resulting state. It must not open the live OM store for writes.
+**Policy export:** extracts pinned Hatfield and Pi definitions from committed source. The existing PHP helper parses source only; teacher generation does not require a PHP bridge or a running Hatfield service.
 
 **Pi adapter:** parses native session ancestry and version-specific ledger formats, preserving originals. Reuse the installed-version semantics where possible; test them with representative fixtures.
 
-**Python orchestration:** manages immutable records, provider calls, annotation jobs, JSONL/optional Parquet analysis, tokenization, SFT exports, evaluation, and reports. This division keeps Hatfield's runtime contract authoritative without requiring the training stack to be PHP.
+**Python runner:** uses the exported Hatfield instructions and tool schemas, calls compatible provider endpoints, and executes local memory handlers with real receipts. Keep the initial Observer prototype small. Record differences from native rendering or validation rather than claiming exact runtime equivalence. Do not write to live memory stores. Train on Hatfield-shaped actions; reserve native Pi contracts for held-out transfer evaluation.
+
+**Python orchestration:** manages records, provider calls, annotation jobs, training exports, evaluation, and reports. Add these stages as the pilot demonstrates a need, not as a prerequisite framework. Retain source-backed acceptance gates before training export.
 
 Cache generation attempts by input hash, task-policy hash, model snapshot, decoding settings, and generation seed/attempt identity. New prompts or policies create new artifacts rather than mutating accepted records in place. Persist started/succeeded/failed states and bounded retries so interrupted jobs resume safely.
 

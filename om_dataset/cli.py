@@ -9,6 +9,7 @@ from pathlib import Path
 from .collection import collect, discover, inventory, normalize_collection, validate_collection
 from .curation import curate_collection, validate_curated_collection
 from .policies import PI_LEGACY_REVISION, PI_REVISION, export_policies, validate_policies
+from .ranges import reconstruct_ranges, validate_ranges
 
 
 def parser() -> argparse.ArgumentParser:
@@ -34,6 +35,9 @@ def parser() -> argparse.ArgumentParser:
     curation = commands.add_parser("curate", help="Select OM-bearing sessions with resolved content evidence.")
     curation.add_argument("collection", type=Path)
     curation.add_argument("--output", type=Path, required=True)
+    ranges = commands.add_parser("reconstruct-ranges", help="Recover historical Observer boundaries from a curated corpus.")
+    ranges.add_argument("collection", type=Path)
+    ranges.add_argument("--output", type=Path, required=True)
     policies = commands.add_parser("export-policies", help="Export pinned agent instructions and worker tools offline.")
     policies.add_argument("collection", type=Path)
     policies.add_argument("--output", type=Path, required=True)
@@ -53,12 +57,15 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "validate":
             manifest = json.loads((args.collection.expanduser() / "manifest.json").read_text())
             validators = {"om-curated-corpus/1": validate_curated_collection,
-                          "om-agent-policies/1": validate_policies}
+                          "om-agent-policies/1": validate_policies,
+                          "om-observer-ranges/1": validate_ranges}
             report = validators.get(manifest.get("schema_version"), validate_collection)(args.collection)
         elif args.command == "normalize":
             report = normalize_collection(args.collection, args.output)
         elif args.command == "curate":
             report = curate_collection(args.collection, args.output)
+        elif args.command == "reconstruct-ranges":
+            report = reconstruct_ranges(args.collection, args.output)
         elif args.command == "export-policies":
             report = export_policies(args.collection, args.output, args.hatfield_repo, args.pi_repo,
                                      args.pi_runtime_repo,
