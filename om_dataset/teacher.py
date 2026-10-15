@@ -7,6 +7,8 @@ import hashlib
 import json
 import math
 import os
+import re
+import time
 from datetime import datetime
 from http.client import HTTPSConnection
 from pathlib import Path
@@ -20,7 +22,7 @@ from .policies import validate_policies
 
 
 PROVIDER = "opencode-go"  # Change to "deepseek" to use the direct API.
-JOBS_PATH = Path("data/ranges-2026-10-13/pilot-jobs.jsonl")
+JOBS_PATH = Path("data/teacher-pilot/pilot-jobs.jsonl")
 OUTPUT_PATH = Path("data/teacher-pilot/attempts.jsonl")
 POLICIES_PATH = Path("data/policies-2026-10-13")
 STUDENT_CONTEXT_WINDOW = 131_072  # LFM; the DeepSeek teacher supports 1M.
@@ -31,6 +33,23 @@ PROVIDERS = {
                  "api_key_env": "DEEPSEEK_API_KEY"},
 }
 REQUEST_OPTIONS = {"max_tokens": 65536, "thinking": {"type": "enabled"}, "reasoning_effort": "low"}
+RUN_LIMITS = {"max_duration_seconds": 900, "max_completion_tokens": 131_072, "max_no_progress_turns": 3}
+
+
+class BudgetExceeded(Exception):
+    """An attempt exhausted a declared resource budget, not a successful no-op."""
+
+
+def _tool(policy):
+    return {"type": "function", "function": {k: policy["tools"][0][k] for k in ("name", "description", "parameters")}}
+
+
+def _tokens(value):
+    return math.ceil(len(json.dumps(value, ensure_ascii=False)) / 2.35) + 32
+
+
+def _context_tokens(messages, tools):
+    return _tokens({"messages": messages, "tools": tools, "tool_choice": "auto"})
 
 
 def complete_request(body: dict, run_id: str, config: dict, timeout: int) -> dict:
@@ -79,13 +98,18 @@ def render(job: dict) -> tuple[str, set[tuple[str, int]]]:
                 raise ValueError("Invalid native source references")
             allowed.update((r["run_id"], r["seq"]) for r in refs)
             label = f"[Source entry id: {run}:{seq}]"
-            blocks.append(source["text"] if source["text"].startswith(label) else label + "\n" + source["text"])
+            if "continuation_frame" in source:
+                start, end = source["text_span"]
+                blocks.append(source["continuation_frame"] + f"\n[Source continuation: original chars {start}:{end}]\n" + source["text"])
+            else:
+                blocks.append(source["text"] if source["text"].startswith(label) else label + "\n" + source["text"])
             continue
         allowed.add((run, seq))
         role = source["role"]
         if role == "Tool result":
             role += " for " + source.get("tool_name", "tool")
-        blocks.append(f"[Source entry id: {run}:{seq}]\n[{role} @ {source['timestamp']}]: {source['text']}")
+        continuation = f"[Source continuation: original chars {source['text_span'][0]}:{source['text_span'][1]}]\n" if "text_span" in source else ""
+        blocks.append(f"[Source entry id: {run}:{seq}]\n[{role} @ {source['timestamp']}]: {continuation}{source['text']}")
     reflections = "\n".join(job.get("prior_reflections", [])) or "(none yet)"
     observations = "\n".join(job.get("prior_observations", [])) or "(none yet)"
     text = (f"CURRENT REFLECTIONS:\n{reflections}\n\nCURRENT OBSERVATIONS:\n{observations}"
@@ -144,16 +168,40 @@ def record(arguments: str, accepted: dict, run: str, allowed: set, schema: dict)
     return receipt
 
 
+def _segments(source, run):
+    """Use trusted producer spans; old single-event blocks can use their first header."""
+    if not source.get("native_rendered"):
+        return [{"start": 0, "end": len(source["text"])}]
+    segments = source.get("segments")
+    if segments is None:
+        # Do not scan quoted content for headers or infer a multi-event tool group's framing.
+        label = f"[Source entry id: {run}:{source['seq']}]\n"
+        body = source["text"].removeprefix(label)
+        header = re.match(r"^\[([^\n\]]+) @ (\d{4}-\d{2}-\d{2} \d{2}:\d{2})\](?: ERROR)?:[ \n]?", body)
+        if not source["text"].startswith(label) or len(source["source_refs"]) != 1 or header is None:
+            raise ValueError("Oversized native blocks require trusted segment metadata")
+        segments = [{"start": 0, "end": len(source["text"]), "framing": label + header.group(0)}]
+    position = 0
+    for segment in segments:
+        if (segment["start"] != position or not position < segment["end"] <= len(source["text"])
+                or not isinstance(segment["framing"], str) or not segment["framing"].startswith(f"[Source entry id: {run}:{source['seq']}]")):
+            raise ValueError("Invalid native segment metadata")
+        position = segment["end"]
+    if position != len(source["text"]):
+        raise ValueError("Incomplete native segment metadata")
+    return segments
+
+
 def slice_job(job: dict, policy: dict, config: dict) -> list[dict]:
-    """Pack all sources using Hatfield's context ratio and token estimate, without truncation."""
+    """Pack source bytes and repeat trusted framing on continuation fragments."""
     try:
         render(job)
     except (ValueError, KeyError, TypeError):
         return [job]  # Let run_job save the validation failure without calling the provider.
     estimate = lambda text: math.ceil(len(text) / 2.35)
-    envelope = math.floor(config["context_window"] * 0.65)
-    envelope = min(envelope, config["context_window"] - config["request_options"].get("max_tokens", 0))
-    overhead = estimate(policy["instructions"]) + estimate(json.dumps(policy["tools"], ensure_ascii=False)) + 32
+    # Keep continuation headroom inside the input allowance, after reserving output.
+    envelope = math.floor((config["context_window"] - config["request_options"].get("max_tokens", 0)) * 0.65)
+    overhead = _context_tokens([{"role": "system", "content": policy["instructions"]}], [_tool(policy)])
     reflections = list(job.get("prior_reflections", []))
     observations = list(job.get("prior_observations", []))
     memory_budget = math.floor((envelope - overhead) * 0.55)
@@ -169,7 +217,9 @@ def slice_job(job: dict, policy: dict, config: dict) -> list[dict]:
     base = {**job, "prior_reflections": reflections, "prior_observations": observations}
 
     def fits(sources):
-        return overhead + estimate(render({**base, "sources": sources})[0]) <= envelope
+        messages = [{"role": "system", "content": policy["instructions"]},
+                    {"role": "user", "content": render({**base, "sources": sources})[0]}]
+        return _context_tokens(messages, [_tool(policy)]) <= envelope
 
     chunks, group = [], []
     for source in job["sources"]:
@@ -182,15 +232,25 @@ def slice_job(job: dict, policy: dict, config: dict) -> list[dict]:
         if fits([source]):
             group = [source]
             continue
-        empty = {**source, "text": ""}
-        framing = estimate(render({**base, "sources": [empty]})[0])
-        chars = math.floor((envelope - overhead - framing) * 2.35)
-        if chars < 1:
-            raise ValueError("Fixed prompt cannot fit the model context")
-        for start in range(0, len(source["text"]), chars):
-            end = min(start + chars, len(source["text"]))
-            part = {**source, "text": source["text"][start:end], "text_span": [start, end]}
-            chunks.append({**base, "sources": [part]})
+        for segment in _segments(source, job["run_id"]):
+            start = segment["start"]
+            while start < segment["end"]:
+                def fragment(end):
+                    part = {**source, "text": source["text"][start:end], "text_span": [start, end]}
+                    if source.get("native_rendered"):
+                        part["continuation_frame"] = segment["framing"]
+                    return part
+                low, high = start, segment["end"]
+                while low < high:
+                    middle = (low + high + 1) // 2
+                    if fits([fragment(middle)]):
+                        low = middle
+                    else:
+                        high = middle - 1
+                if low == start:
+                    raise BudgetExceeded("initial_context")
+                chunks.append({**base, "sources": [fragment(low)]})
+                start = low
     if group:
         chunks.append({**base, "sources": group})
     return [{**chunk, "chunk_index": index, "chunk_count": len(chunks)}
@@ -199,18 +259,38 @@ def slice_job(job: dict, policy: dict, config: dict) -> list[dict]:
 
 def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
     messages, accepted, usage = [], {}, []
-    rejected = calls = 0
+    rejected = calls = spent = no_progress = 0
+    limits = {**RUN_LIMITS, **config.get("run_limits", {})}
+    deadline = time.monotonic() + limits["max_duration_seconds"]
     result = {"status": "failed", "quality_status": "unreviewed", "training_ready": False,
-              "reconstruction": "fresh_replay", "renderer": "python-observer-pilot/1", "job": job}
-    tool = {"type": "function", "function": {k: policy["tools"][0][k] for k in ("name", "description", "parameters")}}
+              "reconstruction": "fresh_replay", "renderer": "python-observer-pilot/2", "job": job,
+              "limits": limits, "request_contexts": []}
+    tool = _tool(policy)
     result["tools"] = [tool]
     try:
+        if "_slice_budget_error" in job:
+            raise BudgetExceeded(job["_slice_budget_error"])
         text, allowed = render(job)
         messages = [{"role": "system", "content": policy["instructions"]}, {"role": "user", "content": text}]
         seen_ids = set()
         while True:
-            response = complete({**config["request_options"], "model": config["model"], "messages": messages,
-                                 "tools": [tool], "tool_choice": "auto"}, job["run_id"])
+            remaining = deadline - time.monotonic()
+            reserve = config["request_options"].get("max_tokens", 0)
+            context = _context_tokens(messages, [tool])
+            if remaining <= 0:
+                raise BudgetExceeded("deadline")
+            if context + reserve > config["context_window"]:
+                raise BudgetExceeded("context_window")
+            if spent + reserve > limits["max_completion_tokens"]:
+                raise BudgetExceeded("completion_tokens")
+            result["request_contexts"].append({"estimated_input_tokens": context, "output_allowance": reserve})
+            body = {**config["request_options"], "model": config["model"], "messages": messages,
+                    "tools": [tool], "tool_choice": "auto"}
+            if complete is None:
+                timeout = min(remaining, policy["call_options"]["maxDurationSeconds"])
+                response = complete_request(body, job["run_id"], config, timeout)
+            else:
+                response = complete(body, job["run_id"])
             usage.append(response.get("usage", {}))
             choice = response["choices"][0]
             if choice["finish_reason"] not in {"stop", "tool_calls"}:
@@ -220,16 +300,26 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
                 raise ValueError("Expected an assistant response")
             message = {k: raw[k] for k in ("role", "content", "tool_calls", "reasoning_content") if k in raw}
             messages.append(message)
+            completion_tokens = response.get("usage", {}).get("completion_tokens")
+            spent += completion_tokens if type(completion_tokens) is int and completion_tokens >= 0 else _tokens(message)
+            if time.monotonic() >= deadline:
+                raise BudgetExceeded("deadline")
+            if spent > limits["max_completion_tokens"]:
+                raise BudgetExceeded("completion_tokens")
             proposed = raw.get("tool_calls") or []
             if not proposed:
                 if choice["finish_reason"] != "stop" or not isinstance(raw.get("content"), str) or not raw["content"].strip():
                     raise ValueError("Missing final completion")
                 if rejected and not accepted:
                     raise ValueError("All-rejected runs are not successful no-ops")
+                student_messages = [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
+                if _context_tokens(student_messages, [tool]) > config["context_window"]:
+                    raise BudgetExceeded("student_sequence")
                 result["status"] = "completed"
                 break
             if choice["finish_reason"] != "tool_calls":
                 raise ValueError("Inconsistent tool-call finish reason")
+            before = len(accepted)
             for call in proposed:
                 calls += 1
                 cid = call["id"]
@@ -242,6 +332,12 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
                 receipt = record(function["arguments"], accepted, job["run_id"], allowed, tool["function"]["parameters"])
                 rejected += receipt["rejected"]
                 messages.append({"role": "tool", "tool_call_id": cid, "content": json.dumps(receipt)})
+            no_progress = no_progress + 1 if len(accepted) == before else 0
+            if no_progress >= limits["max_no_progress_turns"]:
+                result.update(status="stalled", error={"type": "NoProgress", "consecutive_turns": no_progress})
+                break
+    except BudgetExceeded as error:
+        result.update(status="budget_exhausted", error={"type": "BudgetExceeded", "reason": str(error)})
     except Exception as error:
         # Never persist provider exception text: it may contain credentials or request bodies.
         result["error"] = {"type": type(error).__name__}
@@ -250,38 +346,130 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
     # Some DeepSeek modes require reasoning_content on continuation. Keep it transient, not a training target.
     result.update(messages=[{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages],
                   observations=list(accepted.values()), usage=usage, tool_calls=calls, rejected_items=rejected,
-                  requires_recovery_mask=bool(rejected))
+                  requires_recovery_mask=bool(rejected), completion_tokens=spent)
+    student_tokens = _context_tokens(result["messages"], [tool])
+    result["student_context"] = {"estimated_tokens": student_tokens, "context_window": config["context_window"],
+                                 "fits": student_tokens <= config["context_window"],
+                                 "estimator": "serialized-json-characters/2.35+32", "exact_tokenizer_checked": False}
     return result
 
 
-def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, complete) -> dict:
+def _resume(output, path):
+    """Recover only a torn, unterminated tail; a corrupt complete line is an error."""
+    completed, recovered = {}, 0
+    output.seek(0)
+    while True:
+        start = output.tell()
+        line = output.readline()
+        if not line:
+            break
+        try:
+            row = json.loads(line)
+        except (json.JSONDecodeError, UnicodeDecodeError):
+            if line.endswith(b"\n") or output.read(1):
+                raise ValueError("Corrupt attempt log record; refusing to skip it") from None
+            quarantine = path.with_name(path.name + ".torn-" + hashlib.sha256(line).hexdigest()[:16])
+            if quarantine.exists():
+                if quarantine.read_bytes() != line:
+                    raise ValueError("Conflicting tail quarantine")
+            else:
+                fd = os.open(quarantine, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as tail:
+                    tail.write(line)
+                    tail.flush()
+                    os.fsync(tail.fileno())
+            output.truncate(start)
+            output.flush()
+            os.fsync(output.fileno())
+            recovered = 1
+            break
+        if row["status"] == "completed":
+            completed[row["job_id"]] = {"status": "completed", "observations": row["observations"]}
+        if not line.endswith(b"\n"):
+            output.write(b"\n")
+            output.flush()
+            os.fsync(output.fileno())
+    return completed, recovered
+
+
+def _memory_line(observation):
+    return f"[{observation['observation_id']}] {observation['timestamp']} [{observation['relevance']}] {observation['content']}"
+
+
+def _advance(state, observations, cutoff):
+    merged = {o["observation_id"]: o for o in state["observations"]}
+    for observation in observations:
+        merged.setdefault(observation["observation_id"], observation)
+    return {**state, "observations": list(merged.values()), "cutoff_seq": cutoff}
+
+
+def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, complete=None) -> dict:
     if input_path.resolve() == output_path.resolve():
         raise ValueError("Input and output must differ")
     output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(output_path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
-    summary = {"completed": 0, "failed": 0, "skipped": 0}
-    with os.fdopen(fd, "a+") as output:
+    summary = dict.fromkeys(("completed", "failed", "skipped", "stalled", "budget_exhausted", "blocked", "recovered_tails"), 0)
+    states, blocked = {}, set()
+    with os.fdopen(fd, "a+b") as output:
         fcntl.flock(output, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.fchmod(output.fileno(), 0o600)
-        output.seek(0)
-        seen = {r["job_id"] for line in output if (r := json.loads(line))["status"] == "completed"}
+        seen, summary["recovered_tails"] = _resume(output, output_path)
         code_hash = file_hash(Path(__file__))
         for line in input_path.open():
             if not line.strip():
                 continue
-            for job in slice_job(json.loads(line), policy, config):
+            original = json.loads(line)
+            if original.get("historical_range_id") and not original.get("state_scope"):
+                raise ValueError("Historical replay requires an explicit archive/branch state_scope")
+            scope = (original["run_id"], original.get("state_scope", ""))
+            state = states.setdefault(scope, {"seed_observations": original.get("prior_observations", []),
+                                             "reflections": original.get("prior_reflections", []),
+                                             "observations": [], "cutoff_seq": 0})
+            if state["cutoff_seq"] >= original["cutoff_seq"]:
+                raise ValueError("Replay jobs must advance chronologically within each state_scope")
+            before_id = hashlib.sha256(canonical(state)).hexdigest()
+            if original.get("state_parent_id", before_id) != before_id:
+                raise ValueError("Replay state parent does not match")
+            base = {**original, "state_before_id": before_id,
+                    "prior_observations": state["seed_observations"] + [_memory_line(o) for o in state["observations"]],
+                    "prior_reflections": list(state["reflections"])}
+            if state["cutoff_seq"]:
+                base["prior_memory_status"] = "teacher_generated_replay"
+            try:
+                chunks = slice_job(base, policy, config)
+            except BudgetExceeded as error:
+                chunks = [{**base, "_slice_budget_error": str(error)}]
+            pending, successful = [], scope not in blocked
+            for index, job in enumerate(chunks):
                 key = hashlib.sha256(canonical({"job": job, "policy": policy, "config": config, "code": code_hash})).hexdigest()
                 if key in seen:
+                    pending.extend(seen[key]["observations"])
                     summary["skipped"] += 1
                     continue
-                result = run_job(job, policy, config, complete)
+                if successful:
+                    result = run_job(job, policy, config, complete)
+                else:
+                    result = {"status": "blocked", "error": {"type": "PredecessorIncomplete"}, "job": job,
+                              "observations": [], "quality_status": "unreviewed", "training_ready": False}
                 result.update(job_id=key, policy_id=policy["definition_id"], config=config, runner_sha256=code_hash)
-                output.write(canonical(result).decode() + "\n")
+                if result["status"] == "completed":
+                    pending.extend(result["observations"])
+                    if index == len(chunks) - 1:
+                        after = _advance(state, pending, original["cutoff_seq"])
+                        result["state_after"] = {"state_id": hashlib.sha256(canonical(after)).hexdigest(),
+                                                 "observation_ids": [o["observation_id"] for o in after["observations"]]}
+                else:
+                    successful = False
+                output.write(canonical(result) + b"\n")
                 output.flush()
                 os.fsync(output.fileno())
                 summary[result["status"]] += 1
                 if result["status"] == "completed":
-                    seen.add(key)
+                    seen[key] = {"status": "completed", "observations": result["observations"]}
+            if successful:
+                states[scope] = _advance(state, pending, original["cutoff_seq"])
+            else:
+                blocked.add(scope)
     return summary
 
 
@@ -308,12 +496,9 @@ def main(argv=None) -> int:
         if not os.environ.get(config["api_key_env"]):
             parser.error(f"Missing {config['api_key_env']}")
 
-        def complete(body, run_id):
-            return complete_request(body, run_id, config, policy["call_options"]["maxDurationSeconds"])
-
-        summary = run_file(JOBS_PATH, OUTPUT_PATH, policy, config, complete)
+        summary = run_file(JOBS_PATH, OUTPUT_PATH, policy, config)
         print(json.dumps(summary))
-        return 1 if summary["failed"] else 0
+        return 1 if any(summary[s] for s in ("failed", "stalled", "budget_exhausted", "blocked")) else 0
     except Exception as error:
         print(f"Observer pilot failed ({type(error).__name__}); no request text printed.")
         return 1

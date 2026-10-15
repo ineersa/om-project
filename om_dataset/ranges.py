@@ -278,10 +278,10 @@ def reconstruct_ranges(curated: Path, output: Path) -> dict:
     return report
 
 
-def prepare_pilot(output: Path, upstream: Path) -> int:
+def prepare_pilot(output: Path, upstream: Path, jobs_path: Path | None = None) -> int:
     """Three independent first ranges; fresh memory, verified source bytes, no labeling."""
     seen = set()
-    with (output / "pilot-jobs.jsonl").open("xb") as destination:
+    with (jobs_path or output / "pilot-jobs.jsonl").open("xb") as destination:
         os.chmod(destination.name, 0o600)
         for row in _rows(output / "ranges.jsonl"):
             if (row["status"] != "source_verified" or row["coverage"]["source_start_seq"] != 1
@@ -298,8 +298,11 @@ def prepare_pilot(output: Path, upstream: Path) -> int:
             blocks, _ = match
             timestamps = {e["seq"]: datetime.fromisoformat(e["ts"]).strftime("%Y-%m-%d %H:%M") for e in events}
             job = {"run_id": row["session_id"], "cutoff_seq": max(r["seq"] for r in row["source_refs"]),
+                   "state_scope": row["native_identity"]["store_sha256"],
+                   "source_archive_ref": row["source_archive_ref"],
                    "local_time": datetime.fromisoformat(row["coverage"]["covered_at"]).strftime("%Y-%m-%d %H:%M"),
-                   "sources": [{"seq": b["seq"], "role": "Assistant", "timestamp": timestamps[b["seq"]],
+                   "sources": [{"seq": b["seq"], "role": {"user": "User", "tool": "Tool result"}.get(b["segments"][0]["role"], "Assistant"),
+                                "timestamp": timestamps[b["seq"]], "segments": b["segments"],
                                 "text": b["rendered_text"], "source_refs": b["source_refs"], "native_rendered": True} for b in blocks],
                    "historical_range_id": row["range_id"], "historical_source_digest": row["coverage"]["source_digest"],
                    "historical_part_digest": row["coverage"]["part_digest"],

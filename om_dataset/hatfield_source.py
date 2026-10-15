@@ -60,14 +60,31 @@ def _timestamp(event):
     return parsed.isoformat(timespec="seconds").replace("T", " ")[:16]
 
 
-def _block(event, kind, body, refs=None):
+def _part(text, role, timestamp, framing):
+    return {"text": text, "role": role.lower(), "timestamp": timestamp, "framing": framing}
+
+
+def _block(event, kind, parts, refs=None):
+    prefix = f"[Source entry id: {event['run_id']}:{event['seq']}]\n"
+    rendered = prefix + "\n".join(p["text"] for p in parts).rstrip(" \t\n\r\0\x0b")
+    segments, offset = [], len(prefix)
+    for index, part in enumerate(parts):
+        end = min(len(rendered), offset + len(part["text"]) + (index < len(parts) - 1))
+        segments.append({"start": 0 if index == 0 else offset, "end": end,
+                         "framing": prefix + part["framing"], "role": part["role"],
+                         "timestamp": part["timestamp"]})
+        offset = end
     return {"run_id": event["run_id"], "seq": event["seq"], "kind": kind,
-            "rendered_text": f"[Source entry id: {event['run_id']}:{event['seq']}]\n" + body.rstrip(" \t\n\r\0\x0b"),
+            "rendered_text": rendered, "segments": segments,
             "source_refs": refs if refs is not None else [{"run_id": event["run_id"], "seq": event["seq"]}]}
 
 
 def build_blocks(events: list[dict], chars_per_token: float = 2.35) -> list[dict]:
-    """Render events in native emission order, including delayed/unmatched tool calls."""
+    """Render native bytes and trusted, character-offset segments covering each block.
+
+    A segment owns the separator following it; the first also owns the source label.
+    Framing includes that label and construction metadata, never parsed body text.
+    """
     pending, blocks = {}, []
     for event in sorted(events, key=lambda e: e["seq"]):
         timestamp, p, kind = _timestamp(event), event["payload"], event["type"]
@@ -76,7 +93,7 @@ def build_blocks(events: list[dict], chars_per_token: float = 2.35) -> list[dict
             label = {"user": "User", "assistant": "Assistant", "tool": "Tool"}.get(role.lower())
             if label is None:
                 label = (role[:1].upper() if role[:1] in "abcdefghijklmnopqrstuvwxyz" else role[:1]) + role[1:]
-            return f"[{label} @ {timestamp}]: {text}"
+            return _part(f"[{label} @ {timestamp}]: {text}", role, timestamp, f"[{label} @ {timestamp}]")
         if kind == "run_started":
             messages = _get(_get(p, "payload"), "messages", _get(p, "messages"))
             if isinstance(messages, (dict, list)):
@@ -84,13 +101,13 @@ def build_blocks(events: list[dict], chars_per_token: float = 2.35) -> list[dict
                     if isinstance(message, (dict, list)):
                         role = _string(_get(message, "role", "user"))
                         if role not in {"system", "developer", "user-context"}:
-                            blocks.append(_block(event, "message", role_line(role, _text(message))))
+                            blocks.append(_block(event, "message", [role_line(role, _text(message))]))
         elif kind == "agent_command_applied":
             text = _string(_get(p, "text", ""))
             message = _get(p, "message")
             if not text and isinstance(message, (dict, list)):
                 text = _text(message)
-            blocks.append(_block(event, "user", role_line("User", text)))
+            blocks.append(_block(event, "user", [role_line("User", text)]))
         elif kind == "llm_step_completed":
             assistant, parts = _get(p, "assistant_message"), []
             if isinstance(assistant, (dict, list)):
@@ -104,14 +121,15 @@ def build_blocks(events: list[dict], chars_per_token: float = 2.35) -> list[dict
                         function = _get(call, "function")
                         name = _string(_get(call, "name", _get(function, "name", "tool")))
                         args = _get(call, "arguments", _get(function, "arguments", []))
-                        parts.append(f"[Tool call {cid} name={name} args={_json(args)}]")
+                        parts.append(_part(f"[Tool call {cid} name={name} args={_json(args)}]", "assistant", timestamp,
+                                           f"[Assistant tool call {cid} name={name} @ {timestamp}]"))
                         if cid:
                             pending[cid] = (event, parts)
                             parts = []
             elif isinstance(_get(p, "text"), str):
                 parts.append(role_line("Assistant", p["text"]))
             if parts:
-                blocks.append(_block(event, "assistant", "\n".join(parts)))
+                blocks.append(_block(event, "assistant", parts))
         elif kind == "tool_execution_end":
             typed = _get(p, "tool_result")
             if not isinstance(typed, (dict, list)):
@@ -123,20 +141,26 @@ def build_blocks(events: list[dict], chars_per_token: float = 2.35) -> list[dict
                 text = text[:400] + f"\n...[tool output digest sha256={_sha(text)} chars={len(text)}]...\n" + text[-200:]
             error = " ERROR" if _get(typed, "is_error") is True else ""
             line = f"[Tool result for {name} @ {timestamp}]{error}:\n{text}"
+            result_part = _part(line, "tool", timestamp,
+                                f"[Tool result {cid} name={name} @ {timestamp} state={'ERROR' if error else 'OK'}]")
             if cid and cid in pending:
                 call_event, parts = pending.pop(cid)
                 refs = {(e["run_id"], e["seq"]) for e in (call_event, event)}
                 normalized = [{"run_id": run, "seq": seq} for run, seq in sorted(refs) if run and seq >= 1]
-                blocks.append(_block(call_event, "tool_group", "\n".join(parts) + "\n" + line, normalized))
+                blocks.append(_block(call_event, "tool_group", parts + [result_part], normalized))
             else:
-                blocks.append(_block(event, "tool_result", line))
+                blocks.append(_block(event, "tool_result", [result_part]))
         elif kind == "llm_step_failed":
             retryable = _get(p, "retryable", False) not in (None, False, 0, "", "0", [], {})
-            blocks.append(_block(event, "outcome", f"[Outcome @ {timestamp}]: llm_step_failed retryable={str(retryable).lower()}"))
+            blocks.append(_block(event, "outcome", [_part(
+                f"[Outcome @ {timestamp}]: llm_step_failed retryable={str(retryable).lower()}",
+                "outcome", timestamp, f"[Outcome @ {timestamp}] role=llm_step_failed")]))
         elif kind == "agent_end":
-            blocks.append(_block(event, "outcome", f"[Outcome @ {timestamp}]: agent_end reason={_string(_get(p, 'reason', 'completed'))}"))
+            blocks.append(_block(event, "outcome", [_part(
+                f"[Outcome @ {timestamp}]: agent_end reason={_string(_get(p, 'reason', 'completed'))}",
+                "outcome", timestamp, f"[Outcome @ {timestamp}] role=agent_end")]))
     for event, parts in pending.values():
-        blocks.append(_block(event, "tool_call", "\n".join(parts)))
+        blocks.append(_block(event, "tool_call", parts))
     return blocks
 
 
@@ -145,7 +169,7 @@ def _sha(text):
 
 
 def source_digest(blocks) -> str:
-    """Hash native insertion-ordered JSON, excluding source_refs."""
+    """Hash native insertion-ordered JSON, excluding reference and segment metadata."""
     return _sha(_json([{k: block[k] for k in ("run_id", "seq", "kind", "rendered_text")} for block in blocks]))
 
 

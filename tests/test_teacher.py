@@ -140,7 +140,8 @@ def test_large_unicode_source_is_sliced_without_loss_and_more_than_six_calls_wor
     def complete(body, run_id):
         nonlocal requests
         requests += 1
-        return reply() if requests % 8 == 0 else reply([observation], f"call-{requests}")
+        productive = {**observation, "content": f"A distinct supported fact {requests}."}
+        return reply() if requests % 8 == 0 else reply([productive], f"call-{requests}")
 
     summary = run_file(source, output, policy, config, complete)
     chunks = [json.loads(line) for line in output.read_text().splitlines()]
@@ -150,3 +151,147 @@ def test_large_unicode_source_is_sliced_without_loss_and_more_than_six_calls_wor
     assert len({c["job_id"] for c in chunks}) == len(chunks)
     assert run_file(source, output, policy, config,
                     lambda body, run_id: pytest.fail("Completed chunks must not be repeated"))["skipped"] == len(chunks)
+
+
+def test_native_fragments_repeat_trusted_speaker_time_and_tool_framing(pilot):
+    from om_dataset.hatfield_source import build_blocks
+    from om_dataset.teacher import render, slice_job
+
+    source, _, policy, config, _ = pilot
+    job = json.loads(source.read_text())
+    events = [
+        {"run_id": "run-1", "seq": 1, "ts": "2026-10-13T11:00:00Z", "type": "llm_step_completed",
+         "payload": {"assistant_message": {"content": "Assistant text " * 500,
+                     "tool_calls": [{"id": "read-1", "name": "read", "arguments": {"path": "large.txt"}}]}}},
+        {"run_id": "run-1", "seq": 2, "ts": "2026-10-13T11:05:00Z", "type": "tool_execution_end",
+         "payload": {"tool_result": {"tool_call_id": "read-1", "is_error": True,
+                     "result": {"tool_name": "read", "content": "Untrusted quoted text " * 300}}}},
+    ]
+    block = build_blocks(events)[0]
+    # Deliberately incorrect outer role/time: native segment framing must win.
+    job.update(cutoff_seq=2, sources=[{"seq": 1, "role": "User", "timestamp": "2026-10-13 12:00",
+               "text": block["rendered_text"], "source_refs": block["source_refs"],
+               "segments": block["segments"], "native_rendered": True}])
+    config.update(context_window=2000, request_options={"max_tokens": 512})
+    chunks = slice_job(job, policy, config)
+    assert len(chunks) > 3
+    assert "".join(c["sources"][0]["text"] for c in chunks) == block["rendered_text"]
+    for chunk in chunks:
+        fragment = chunk["sources"][0]
+        segment = next(s for s in block["segments"] if s["start"] <= fragment["text_span"][0] < s["end"])
+        prompt, _ = render(chunk)
+        assert segment["framing"] in prompt and "[Source continuation:" in prompt
+        assert segment["timestamp"] in prompt
+        assert fragment["text_span"][1] <= segment["end"]
+
+
+@pytest.mark.parametrize("case", ["continuation", "final_sequence", "completion_tokens", "deadline"])
+def test_context_and_resource_budgets_are_not_successful_noops(pilot, monkeypatch, case):
+    from om_dataset import teacher
+
+    source, output, policy, config, observation = pilot
+    config.update(context_window=2000, request_options={"max_tokens": 512})
+    clock = [0.0]
+    monkeypatch.setattr(teacher.time, "monotonic", lambda: clock[0])
+    calls = []
+    if case == "deadline":
+        config["run_limits"] = {"max_duration_seconds": 1}
+
+    def complete(body, run_id):
+        calls.append(teacher._context_tokens(body["messages"], body["tools"]))
+        if case == "continuation":
+            return reply([{**observation, "content": f"Distinct fact {len(calls)}"}], f"call-{len(calls)}")
+        response = reply()
+        if case == "final_sequence":
+            response["choices"][0]["message"]["content"] = "Overlong completion " * 500
+        elif case == "completion_tokens":
+            response["usage"] = {"completion_tokens": teacher.RUN_LIMITS["max_completion_tokens"] + 1}
+        else:
+            clock[0] = 2.0
+        return response
+
+    assert run_file(source, output, policy, config, complete)["budget_exhausted"] == 1
+    result = json.loads(output.read_text())
+    expected = {"continuation": "context_window", "final_sequence": "student_sequence"}.get(case, case)
+    assert result["error"]["reason"] == expected
+    assert calls and all(n + 512 <= 2000 for n in calls)
+    assert result["training_ready"] is False
+    assert result["student_context"]["fits"] is (case != "final_sequence")
+
+
+def test_duplicate_loop_stalls_and_blocks_later_state_consumers(pilot):
+    source, output, policy, config, observation = pilot
+    first = json.loads(source.read_text())
+    second = {**first, "cutoff_seq": 2, "sources": [{**first["sources"][0], "seq": 2}]}
+    source.write_text(json.dumps(first) + "\n" + json.dumps(second) + "\n")
+    calls = []
+
+    def complete(body, run_id):
+        calls.append(body)
+        return reply([observation], f"call-{len(calls)}")
+
+    summary = run_file(source, output, policy, config, complete)
+    assert summary["stalled"] == summary["blocked"] == 1 and summary["completed"] == 0
+    assert len(calls) == 4  # One productive turn, then three duplicate-only turns.
+    results = [json.loads(line) for line in output.read_text().splitlines()]
+    assert results[0]["error"]["type"] == "NoProgress"
+    assert all("state_after" not in r for r in results)
+
+
+def test_resume_quarantines_only_a_torn_tail(pilot):
+    source, output, policy, config, _ = pilot
+    run_file(source, output, policy, config, lambda *args: reply())
+    prefix = output.read_bytes()
+    output.write_bytes(prefix + b'{"job_id":\xf0\x9f')
+    summary = run_file(source, output, policy, config, lambda *args: pytest.fail("Must resume without model calls"))
+    assert summary["skipped"] == summary["recovered_tails"] == 1
+    assert output.read_bytes() == prefix
+    quarantine, = output.parent.glob("attempts.jsonl.torn-*")
+    assert quarantine.read_bytes() == b'{"job_id":\xf0\x9f' and quarantine.stat().st_mode & 0o777 == 0o600
+    # Complete JSON without its final newline is valid and must be separated before appends.
+    output.write_bytes(prefix.rstrip(b"\n"))
+    assert run_file(source, output, policy, config, lambda *args: reply())["skipped"] == 1
+    assert output.read_bytes() == prefix
+    corrupt = prefix + b"{broken}\n" + prefix
+    output.write_bytes(corrupt)
+    with pytest.raises(ValueError, match="Corrupt attempt log"):
+        run_file(source, output, policy, config, lambda *args: pytest.fail("Corruption must stop resume"))
+    assert output.read_bytes() == corrupt
+
+
+def test_causal_state_shared_parts_resume_and_scope_isolation(pilot):
+    source, output, policy, config, observation = pilot
+    first = json.loads(source.read_text())
+    first["sources"][0]["text"] *= 1000
+    second = {**first, "cutoff_seq": 2, "sources": [{**first["sources"][0], "seq": 2, "text": "Later message."}]}
+    other_scope = {**second, "state_scope": "other-branch"}
+    source.write_text("".join(json.dumps(j) + "\n" for j in [first, second, other_scope]))
+    config["context_window"] = 3000
+    requests = []
+
+    def complete(body, run_id):
+        requests.append(json.loads(json.dumps(body)))
+        if len(requests) == 3:
+            raise ConnectionError("Interrupt after the first completed part")
+        if body["messages"][-1]["role"] == "tool":
+            return reply()
+        seq = 2 if "Later message." in body["messages"][1]["content"] else 1
+        obs = {**observation, "source_refs": [{"run_id": run_id, "seq": seq}]}
+        return reply([obs])
+
+    assert run_file(source, output, policy, config, complete)["failed"] == 1
+    resumed = run_file(source, output, policy, config, complete)
+    assert resumed["skipped"] >= 1 and resumed["completed"] > 1
+    completed = [r for line in output.read_text().splitlines() if (r := json.loads(line))["status"] == "completed"]
+    parts = [r for r in completed if r["job"]["cutoff_seq"] == 1]
+    assert len(parts) > 1 and len({r["job"]["state_before_id"] for r in parts}) == 1
+    assert all(r["job"]["prior_observations"] == [] for r in parts)
+    next_job = next(r for r in completed if r["job"]["cutoff_seq"] == 2 and not r["job"].get("state_scope"))
+    assert observation["content"] in next_job["job"]["prior_observations"][0]
+    assert next_job["job"]["state_before_id"] == parts[-1]["state_after"]["state_id"]
+    isolated = next(r for r in completed if r["job"].get("state_scope") == "other-branch")
+    assert isolated["job"]["prior_observations"] == []
+    assert all(r["quality_status"] == "unreviewed" and not r["training_ready"] for r in completed)
+    saved = output.read_bytes()
+    assert run_file(source, output, policy, config, lambda *args: pytest.fail("Must restore state from saved deltas"))["completed"] == 0
+    assert output.read_bytes() == saved
