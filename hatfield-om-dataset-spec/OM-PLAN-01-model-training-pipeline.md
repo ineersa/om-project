@@ -4,6 +4,8 @@
 **Audience:** the coding agent implementing the pipeline  
 **Companion specification:** `OM-DATA-01-hatfield-memory-dataset-spec.md` (named `OM-DATA-01.md` inside the specification package)
 
+**Follow-up:** use [OM-PLAN-02: Judge-guided memory writer training](OM-PLAN-02-judge-guided-training.md) for the next-stage work order and candidate-selection policy. Keep good existing candidates rather than requiring new teacher outputs for every case. Use OM-DATA-01's current implementation boundaries rather than the PHP runtime bridge proposed below.
+
 ## 1. What we are building
 
 Build an **offline, reproducible pipeline that turns historical Hatfield and Pi sessions into a validated training dataset, fine-tunes a small Observational Memory model, and measures whether it is a useful replacement for the current Qwen deployment.**

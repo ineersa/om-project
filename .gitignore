@@ -12,5 +12,16 @@ wheels/
 # Private session archives and collection artifacts
 data/
 .worktrees/
-.hatfield/
+.hatfield/*
+!.hatfield/agents/
+.hatfield/agents/*
+!.hatfield/agents/om-review.md
+!.hatfield/skills/
+.hatfield/skills/*
+!.hatfield/skills/om-review/
+.hatfield/skills/om-review/*
+!.hatfield/skills/om-review/SKILL.md
 .idea/
+
+# Added by ggshield
+.cache_ggshield

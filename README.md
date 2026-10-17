@@ -4,6 +4,8 @@ Collect a private source corpus from legacy Pi OM, current Pi OM, and Hatfield s
 
 This stage makes no model calls. It does not create accepted training labels, reconstruct exact historical prompts, freeze evaluation splits, or run training.
 
+The [first joint training experiment](hatfield-om-dataset-spec/OM-PLAN-02-judge-guided-training.md) defines the next work: export captured traces, prove student compatibility, review a bounded batch automatically, train one adapter across all three roles, and measure held-out performance. More Jev calibration is not a prerequisite.
+
 ## Collect sources
 
 Raw archives and memory candidates may contain credentials and personal information. Keep `data/` private. Git ignores this directory. The collector creates its output directory with mode `0700`, writes data files with mode `0600`, and marks completed archive files read-only. These permissions are not encryption or redaction.
@@ -148,18 +150,12 @@ The prototype is one script, `om_dataset/teacher.py`. It reads prepared developm
 
 Keep jobs and results under private `data/`. Each input JSONL row has `run_id`, `cutoff_seq`, `local_time`, and `sources`. Ordinary sources have an increasing `seq`, `role` (`User`, `Assistant`, or `Tool result`), `timestamp`, and `text`. Tool results may also have `tool_name`. Reconstructed sources set `native_rendered: true` and supply `source_refs`. Their `segments` metadata contains trusted character offsets, speaker, timestamp, and framing from the source builder. Oversized multi-event blocks require these segments; the runner does not infer tool-group boundaries from quoted text. Native emission order can repeat or move backward in anchor sequence, and tool groups include both call and result references. Times use `YYYY-MM-DD HH:MM` in a consistent declared timezone.
 
-Paths and settings are fixed near the top of the script. It reads `data/teacher-pilot/pilot-jobs.jsonl`, loads `data/policies-2026-10-13`, and writes `data/teacher-pilot/attempts.jsonl`. Each run processes unfinished chunks in the prepared jobs file. Run commands from the repository root.
+Paths and settings are fixed near the top of the script. It reads `data/teacher-pilot/two-session-jobs.jsonl`, loads `data/policies-2026-10-13`, and writes `data/teacher-pilot/two-session-attempts.jsonl`. Each run processes unfinished chunks in the prepared jobs file. Run commands from the repository root.
 
-For an existing frozen range release, prepare fresh jobs with segment metadata without changing its manifest. This command refuses to overwrite an existing jobs file:
+Prepare one small Pi session and one small Hatfield session from the frozen ranges. The preparer selects two to four consecutive recovered ranges per session, rejects sessions with excluded ranges, and starts each memory stream empty. Pi sources retain visible text and tool calls but omit thinking; Hatfield source sections retain their hash-verified rendering. Uncovered session tails are not invented. This command refuses to overwrite existing jobs:
 
 ```bash
-uv run python - <<'PY'
-from pathlib import Path
-from om_dataset.ranges import prepare_pilot
-Path("data/teacher-pilot").mkdir(parents=True, exist_ok=True, mode=0o700)
-prepare_pilot(Path("data/ranges-2026-10-13"), Path("data/collection-2026-10-13-v2"),
-	Path("data/teacher-pilot/pilot-jobs.jsonl"))
-PY
+uv run python -m om_dataset.pilot
 ```
 
 Validate inputs without credentials or network calls:
@@ -186,17 +182,202 @@ Source slicing uses LFM's 131,072-token student window, not the DeepSeek teacher
 
 Packing groups complete source blocks when they fit. Oversized blocks split at Unicode character boundaries within trusted segments. Every native fragment repeats its speaker, original timestamp, tool framing where applicable, and an explicit continuation marker. Original text and offsets remain available. No source text is truncated. Visible prior memory receives up to 55% of the initial envelope after fixed overhead. The prototype trims observation lines from the front, then reflection lines from the end; it does not reproduce Hatfield's timestamp/relevance sorting. The original jobs file remains unchanged.
 
+### Credential redaction
+
+The runner replaces known credentials with `[REDACTED]` and padding before slicing or sending source text. It also cleans prior memory, model responses, tool arguments, and reasoning before saving checkpoints or accepting observations. Saved traces contain the redacted content. Masks preserve character counts and line breaks, so trusted source segments and continuation offsets remain valid. Provenance identities and archive references must not change; a credential in those fields stops the run.
+
+Live labeling requires the private catalog at `.hatfield/security/redaction-values.json`. It contains detected credential values, has mode `0600`, and is Git-ignored. Never include it in a training export. The runner also checks current environment credentials, common token formats, private keys, authentication headers, URLs with passwords, and password assignments. To create the catalog on a new checkout with a local GitGuardian report:
+
+```bash
+uv run python -c 'from om_dataset.redaction import build_catalog; print(build_catalog())'
+```
+
+Catalog creation refuses to overwrite an existing catalog. Each job records a fingerprint of the redaction rules and catalog values. Environment credentials are also masked, but rotating them does not change that fingerprint or invalidate completed work. Resume refuses existing traces or checkpoints that still contain detected credentials. Frozen archives and historical candidate records remain unchanged for provenance. They are private source material, not sanitized training exports. Use the runner's redacted messages and labels for training.
+
 ### Causal state and resume
 
 Jobs advance chronologically within each `(run_id, state_scope)` stream. Historical jobs require an explicit `state_scope` that separates archives and branches. The pilot uses store identity plus run ID. Reversed or repeated cutoffs fail visibly; branch inheritance and chronological job scheduling are not inferred automatically. Optional `state_parent_id` asserts the expected prior state. Initial `prior_observations` and `prior_reflections` seed a stream; subsequent jobs receive its teacher-generated state instead of loading historical labels.
 
 All parts of one job share the same pre-job memory snapshot. Only after every part completes does the runner merge their accepted observations into the next job's memory. Saved jobs include `state_before_id`; the final successful part records `state_after`. A failed, stalled, or exhausted part prevents state commitment and blocks later consumers in that stream. Other streams remain independent. This is Observer-only state advancement, without reflection or dropping.
 
-No automatic network retries occur. Rerun the command to retry unfinished chunks; completed chunks with identical input, policy, configuration, and runner code are skipped. Resume reconstructs state from saved successful deltas before building later inputs. Interrupted chunks may require another provider call. Concurrent writers are rejected. An incomplete final JSONL record without a newline is quarantined in a private `.torn-<hash>` file, then the valid prefix is resumed. Corrupt complete lines or corruption before the tail fail visibly.
+No automatic network retries occur. Rerun the command to continue unfinished work; completed chunks with identical input, policy, configuration, and runner code are skipped. Atomic private checkpoints in `attempts.jsonl.checkpoints/` save accepted observations, messages, usage, and progress counters after every completed tool round. Resume continues from that round rather than restarting the chunk. A final response is checkpointed before appending its result, so an interrupted append does not require regenerating it. Checkpoints may retain provider-required reasoning solely for continuation; they are not training records and are deleted after the result is durable. A response interrupted before it is received and saved must still be requested again. Resume reconstructs memory from successful chunk results before building later inputs.
 
-Outputs have `quality_status: unreviewed` and `training_ready: false`. Failed jobs never become successful no-ops. Rejected calls remain in the trace and are marked as requiring recovery masking. Provider-required `reasoning_content` is passed during continuation but excluded from saved training messages. Results include token usage when the provider supplies it; dollar costs are not calculated.
+Concurrent writers are rejected. An incomplete final JSONL record without a newline is quarantined in a private `.torn-<hash>` file, then the valid prefix is resumed. Corrupt complete lines or corruption before the tail fail visibly.
 
-This is a fresh-labeling prototype with recovered source sections, not exact historical requests or a complete Hatfield runtime port. Student-sized slicing can subdivide a recovered range; it does not merge separate historical invocations. The runner checks schema and calendar validity more strictly than the native handler, preserves partial acceptance and duplicate receipts, and uses the pinned observation identity formula. Its packing is not byte-identical to Hatfield's. It does not implement Reflector/Dropper, judge semantic quality, freeze splits, or export SFT token masks. Supplied initial memory requires separate causal review. The three prepared first ranges are development inputs, not a chronological pilot or approved training examples.
+Outputs have `quality_status: unreviewed` and `training_ready: false`. Invalid references and provider failures do not become successful no-ops. An empty Reflector or Dropper batch followed by a final no-action response can finish without changing memory; its rejected call remains in the trace with `protocol_recovery` and required recovery masking. It is not a clean training target. Provider-required `reasoning_content` is passed during continuation but excluded from saved training messages. Results include token usage when the provider supplies it; dollar costs are not calculated.
+
+This is a fresh-labeling prototype with recovered source sections, not exact historical requests or a complete Hatfield runtime port. Student-sized slicing can subdivide a recovered range; it does not merge separate historical invocations. The Observer checks schema and calendar validity more strictly than the native handler, preserves partial acceptance and duplicate receipts, and uses the pinned observation identity formula. Its packing is not byte-identical to Hatfield's. The command above runs Observer only. It does not judge semantic quality, freeze splits, or export SFT token masks. Supplied initial memory requires separate causal review. The small pilot outputs remain unreviewed, not approved training examples.
+
+## Run the larger memory pilot
+
+The larger replay uses the same tool loop for Observer, Reflector, and Dropper. It writes separate files under `data/teacher-long-pilot/`; it does not replace the small pilot, review cases, identity mapping, or votes.
+
+Prepare and validate the two histories without provider calls:
+
+```bash
+uv run python -m om_dataset.long_pilot --dry-run
+```
+
+Run the replay, or rerun the same command to resume:
+
+```bash
+uv run python -m om_dataset.long_pilot
+```
+
+`jobs.manifest.json` records the selected histories, input hash, source sizes, and thresholds. Selection prefers substantial clean prefixes from session start. Pi markers must follow both coverage links and parent ancestry. Hatfield sections must retain both historical hash proofs and contiguous coverage. The preparer never skips a broken boundary or invents an uncovered tail. Historical observation sizes select the cohort; historical memories never enter teacher inputs. Reported initial chunk counts assume empty prior memory; actual slicing can change as teacher memory grows.
+
+### Maintenance and recovery
+
+After an Observer range commits, reflection runs when the active observation content exceeds 40,000 estimated tokens. Dropper runs only when reflection adds at least one new record and the pool exceeds 30,000 tokens. These are the frozen Hatfield defaults, not lowered test thresholds. The server caps and ranks proposed drops by coverage, relevance, timestamp, and proposal order. The cap is not a requirement to drop that many records or a guarantee of reaching the target.
+
+Reflector and Dropper see request-local decimal observation IDs. Accepted records use canonical IDs. Existing reflections remain active; dropping an observation does not remove its reflection support link. Oversized maintenance pools are partitioned without discarding observations. Traces identify each visible partition and any reflections omitted from that request's context.
+
+Reflection and drop tool traces are saved as pending generation work. A durable `generation_commit` row applies new reflections and selected drops together. Its state hash becomes the next Observer range's parent. A failed or interrupted maintenance phase cannot publish a partial generation. Completed phases and tool rounds are reused on resume; dependent ranges remain blocked until the generation completes.
+
+`attempts.jsonl` contains agent traces and generation commits. Progress logs print counts and boundaries, not conversation text. `run.json` pins input, policy, provider settings, redaction policy, and runner code before the first live call. Changed code or settings fail visibly instead of silently restarting paid work in the same campaign. Transport credential rotation remains compatible with resume. Outputs still require human review before training.
+
+### Resume the existing campaign after the maintenance fix
+
+The original campaign is pinned to the earlier runner. Do not edit its `run.json` or restart it with changed code. Use the recovery entry point:
+
+```bash
+uv run python -m om_dataset.recover
+```
+
+Recovery writes to `data/teacher-long-pilot/recovered/state/`. It verifies that the runner changed only at the empty-maintenance final-response guard, reproduces every imported input and tool schema, and retains the original log and pin. Compatible successful traces receive explicit cache aliases. Saved failed replies are revalidated offline through the fixed loop; their visible traces must remain identical, their deltas must stay empty, and their rejections remain flagged. This import makes no provider calls. The replay reconstructs generation commits and requests only unfinished work. The recovery output has its own code and input pin.
+
+## Run controlled memory comparisons
+
+Prepare six fixed-input cases from Hatfield histories only: two Observer, two Reflector, and two Dropper invocations. Pi-derived cases are excluded from judge labeling.
+
+```bash
+uv run python -m om_dataset.comparison --dry-run
+uv run python -m om_dataset.comparison
+```
+
+The comparison reuses captured DeepSeek replies and runs the deployed local Qwen endpoint on exactly the same initial messages, visible memory, original instructions, and tool schemas. No brevity instruction is added. Both runs use the 131,072-token student window and 65,536-token output allowance. The local server's model identity and default generation settings are recorded privately. Reasoning controls differ by provider, so this is not an equal-compute benchmark.
+
+Selection uses manageable nonempty invocations from committed maintenance generations and excludes source tasks with failed attempts. The six cases form a calibration sample, not an unbiased win-rate estimate or two independent end-to-end replays. Reflector evidence is its visible memory pool. Dropper candidates are proposals for the visible partition, not the entire generation's committed removals.
+
+Private snapshots, checkpoints, results, and selection exclusions live under `data/teacher-comparison/`. Preflight records remain separately under `data/teacher-comparison-preflight/`. The exporter stages fixed cases at `data/review-next/cases.jsonl` and the producer mapping at `data/review-next-private/identity-map.json`; it refuses to overwrite or reshuffle either. Candidate text displays accepted actions once, with supporting IDs and any rejected attempts. Raw traces remain in the private results.
+
+For the existing mixed-source pack, replace its three Pi cases without changing the three Hatfield cases:
+
+```bash
+uv run python -m om_dataset.hatfield_review
+```
+
+Replacement inputs, results, and checkpoints live under `data/teacher-hatfield-comparison/`. The command excludes previously selected source jobs, reuses captured teacher replies, and generates three new local-model replies. It publishes only after all three invocations complete. Existing Hatfield wording, A/B assignments, and votes remain unchanged. Pi votes and the old mixed-source packs move to `data/review-history/`; they do not count toward the active judge-labeling pack. Rerunning resumes generation or an interrupted publication without reshuffling candidates or overwriting later votes. The ordinary comparison command refuses a legacy mixed-source manifest rather than silently reusing its Pi cases.
+
+## Review candidates in Hatfield
+
+The project skill `.hatfield/skills/om-review/SKILL.md` runs in the main session. It presents blinded cases, asks for a human preference through `ask_human`, saves each decision atomically, and resumes from the next unanswered case. It does not delegate review to a subagent, run a judge, or supply votes itself. The skill file is trackable; review data, identity mappings, and runtime files remain private.
+
+The active controlled pack contains six Hatfield-only cases covering all three roles. Historical-content comparisons and retired mixed-source packs remain under `data/review-history/` for provenance, not active judge labeling. Replacing Pi cases preserves votes on unchanged Hatfield cases and does not prefill votes for replacements. The facilitator's workflow is unchanged.
+
+The controlled pack uses matched captured inputs. Extra observations alone do not establish an improvement.
+
+Start a fresh review session from the repository root:
+
+```bash
+hatfield --skills om-review
+```
+
+Ask to start or resume the review. Within an existing session, `/skill:om-review` loads the same workflow in the main session, but a fresh session avoids contamination from earlier generation discussions.
+
+Cases live in `data/review/cases.jsonl`. Votes live in `data/review/votes/<case_id>.json`, with a case hash, human choice, optional explanation, timestamp, and revision history. Choices are A, B, both acceptable, neither acceptable, or skip. Discussion and cancellation do not become votes. The facilitator must not read `data/review-private/identity-map.json` or infer producer identities. This is procedural blinding, not a filesystem sandbox. No human review decisions are prefilled.
+
+## Try the Jev judge
+
+The Jev adapter uses TypeSafe's native `Choice` questions, not chat completion or prompted JSON. It pins `jev-1.13.0` and applies [the memory quality rubric](hatfield-om-dataset-spec/om-jev-quality-rubric.md) to six blinded review cases and twelve synthetic controls. Each pair runs in both A/B orders, for at most 36 requests. `--tasks reflector dropper` selects four review cases and seven controls, for 22 requests.
+
+Set `JEV_API_KEY` or `TYPESAFE_API_KEY` in the shell environment. If the key is in your Bash configuration, load it with `source ~/.bashrc`. Do not pass credentials as command arguments. The existing private redaction catalog is also required.
+
+Inspect the inputs and approximate context sizes without API calls:
+
+```bash
+uv run python -m om_dataset.jev_judge --dry-run
+uv run python -m om_dataset.jev_judge --tasks reflector dropper --min-confidence 0.85 --dry-run
+```
+
+Before a live run, authorize sending redacted evidence to TypeSafe. Test the first synthetic pair. Use a fresh output directory when code or inputs have changed. This focused batch includes a case that requires long context:
+
+```bash
+uv run python -m om_dataset.jev_judge --controls-only --max-new-calls 2
+uv run python -m om_dataset.jev_judge --tasks reflector dropper --min-confidence 0.85 --long-context --output data/jev-judge/v5
+```
+
+### Quality checks
+
+The v4 adapter keeps the five quality checks introduced in v3:
+
+| Worker | Checks |
+| --- | --- |
+| Observer | Useful coverage, context recoverability, importance assignment, compression |
+| Reflector | Useful coverage, context recoverability, compression |
+| Dropper | Safe removal |
+
+Each check returns `pass`, `needs_work`, or `uncertain`. Importance assignment evaluates the observation's existing relevance tag, not the severity of a judge-detected defect. A speculative location question selects an affected candidate record or missing source fact. Code ignores that selection unless the check needs work. A failure without a location becomes uncertain rather than a confirmed defect.
+
+The full original role instructions and actual model-facing tool schemas remain in every request. Internal PHP handler source and runtime bindings are excluded because the worker did not receive them. Source evidence and existing memory are not truncated. The original [six controls](hatfield-om-dataset-spec/fixtures/judge-controls.json) remain unchanged; [two additional controls](hatfield-om-dataset-spec/fixtures/jev-quality-controls.json) test identifiers and assigned importance. [Four Reflector and Dropper controls](hatfield-om-dataset-spec/fixtures/jev-reflector-dropper-controls.json) test preserved critical facts, deletion of the last copy, current-state revisions, and valid selective no-ops.
+
+The v4 prompt changes apply only to Jev's judging criteria. Reflector checks distinguish unreflected observations from lost information and stale claims from missing identifiers. Dropper checks require comparing a proposed deletion with every existing reflection and kept observation, after all proposed deletions together. Worker prompts, candidate memories, and Observer judging requests remain unchanged.
+
+The pair gets an independent preference question. Compression cannot override failed coverage, recoverability, importance, or safe removal. Both candidates can preserve the facts while the more compact candidate wins. Raw selections, probabilities, confidence, and preference adjustments remain recorded. Jev does not generate explanations, corrected memories, or quotations. Human votes and producer mappings never enter requests.
+
+### Results and resuming
+
+Results remain private under `data/jev-judge/`. The focused v4 trial is under `data/jev-judge/v4-focused/`; `data/jev-judge/v4/` preserves the initial partial run. The focused runner revalidates six identical recorded replies and makes sixteen new calls. It uses normal context except for `memory-006`, whose stricter request exceeded the normal-context limit. Its `run.py`, `audit.py`, and `notes.md` record the procedure and limits. Earlier results are not overwritten. The standard CLI does not reuse replies across directories.
+
+Records retain each check's status and location, redacted request snapshots, and typed responses. The adapter validates answer IDs, option sets, probability ranges, and the pinned model version. It allows bounded sum error from two-decimal probability rounding without changing returned probabilities. Non-maximal choices in unused speculative location answers do not invalidate the primary decisions. Active concrete locations and primary answers still require maximum-probability choices.
+
+`--min-confidence` defaults to `0.85`. Primary checks below the cutoff become `uncertain`, not failures or passes. Pairwise preferences below the cutoff abstain too. An identical-candidate override can establish a tie without the pairwise answer. Speculative locations retain their separate confidence; the primary cutoff does not certify a record pointer. Records save both ungated `assessment` and `confidence_assessment`, and reports compare their counts. The cutoff is pinned with the run settings.
+
+`review_status` summarizes all applicable checks, including compression. The legacy `verdict` field summarizes only non-compression checks so earlier factual-adequacy controls remain comparable. A verbose candidate can have `verdict: acceptable` but `review_status: needs_work`. Neither field approves a training example. Reports retain raw and code-composed preferences, check-status and location stability, legacy control results, and separate targeted quality-check results. Status counts include both candidates in every call and both A/B orders. `calibrated` and `training_ready` remain false. Stronger-judge checks and an independent audit are still needed before automated training-data selection.
+
+Rerun with the same options to resume missing requests without repeating completed or failed calls. Service errors stop the batch. Interrupted calls remain failures rather than triggering an automatic retry. Changed code, criteria, inputs, or cutoff require a fresh directory.
+
+Rebuild a complete run's report without API calls:
+
+```bash
+uv run python -m om_dataset.jev_judge --tasks reflector dropper --min-confidence 0.85 --long-context --output data/jev-judge/v5 --report-only
+```
+
+Context estimates use the project's character heuristic, not Jev's tokenizer. Estimates above the default limits produce warnings; TypeSafe validates actual token counts. The adapter never truncates evidence or automatically retries with larger context. Use `--long-context` only when needed to opt into TypeSafe's slower, less accurate 262k mode. Its default limits are 32k per question and 64k per request. See [TypeSafe's model limits](https://docs.typesafe.ai/models).
+
+## Try the prompted judge
+
+This earlier DeepSeek pilot remains available for comparison. It does not use schema-enforced output; use the Jev adapter above for native typed judgments. The shared prompt is now version 5, so new DeepSeek runs need a fresh directory, such as `--output data/judge-pilot/v6`; earlier results cannot be resumed with the changed prompt.
+
+The judge pilot uses DeepSeek V4.1 Flash with high reasoning through the provider selected in `om_dataset.teacher`. It defaults to OpenCode Go. It uses the six active review cases and six synthetic controls, with each pair evaluated in both candidate orders. This is a development trial, not a calibrated acceptance gate or a training-data exporter.
+
+The prompt treats substantially less memory text and fewer records as primary preferences when the core information survives. Some loss of secondary detail is acceptable. Both candidates can remain acceptable while the more compact candidate wins. Three controls check this trade-off: three observations versus ten, one sentence versus three, and a shorter candidate that must lose because it omits an active approval constraint. These controls supplement the original false-completion, invented-reflection, and unsafe-removal cases.
+
+Inspect [the judge prompt](hatfield-om-dataset-spec/om-judge-prompt.md), then validate inputs without network calls:
+
+```bash
+uv run python -m om_dataset.judge --dry-run
+```
+
+Before a live run, authorize transmission of the redacted case evidence to the configured provider. The private credential catalog is required. Predictions receive task policies, evidence, and anonymous candidate text. They do not receive human votes, expected control answers, or producer mappings.
+
+```bash
+uv run python -m om_dataset.judge
+```
+
+The pilot makes at most 24 calls, with 32,768 completion tokens and a 900-second timeout per call. Use `--max-new-calls 2` to run a small part and resume later. It validates response structure and exact evidence quotations. Two logged formatting repairs are permitted: remove unexpected candidate-level fields containing only null or an empty string, and resolve a nested evidence label when its exact quotation is verified within that labeled segment of one outer block. Original reply content is retained; repairs cannot change judgments or quotations. Other invalid assessments, provider failures, and truncated replies remain failures, not successful no-ops or approvals. Provider-required reasoning is not saved. Dollar costs are not calculated.
+
+Results and the comparison report remain private under `data/judge-pilot/v5/`. Earlier trials remain in separate directories. Their predictions cannot be reused with this revised prompt. Each prediction is saved separately, so rerunning reuses saved records. Failed records remain failed; there are no automatic retries. Changed prompts, inputs, configuration, or runner code require a new directory, such as `--output data/judge-pilot/v6`. After a parser-only change, `--reuse-predictions-from data/judge-pilot/v5` revalidates recorded replies in a new directory offline where requests match exactly. Reuse rejects changed prompts, cases, policies, or provider settings and records the original file hash; it does not overwrite the earlier run.
+
+Human votes are loaded after the inference phase and never enter prediction requests. The report compares preferences with those votes, checks order stability, and scores the synthetic controls separately. It reports missing and failed calls separately. Structured swapped verdicts are mapped back to the original labels; free-text explanations retain the as-shown labels recorded in `explanation_label_order`. A preferred candidate is not automatically an acceptable training target. The report always leaves `calibrated` and `training_ready` false.
+
+Rebuild a report from complete saved prediction files without model calls:
+
+```bash
+uv run python -m om_dataset.judge --report-only
+```
+
+Inspect disagreements and invalid replies before changing the prompt. Keep this six-case pack as development material. Check the revised prompt on a separate human-reviewed batch before trusting automatic acceptance. The existing votes have no per-case written reasons. The reviewer has since clarified that substantially fewer records and less text can outweigh a small loss of secondary detail; preference agreement alone still cannot establish that the judge applies this trade-off correctly.
 
 ## Verify a collection
 
@@ -238,9 +419,9 @@ All histories remain in the archive, including sessions without OM outputs and r
 
 ## Next stages
 
-1. Establish lineage groups and invocation-level duplicate checks on the OM-only view, then freeze train, validation, and test assignments before labeling. Grouping prevents shared histories from entering both training and evaluation; it does not exclude long sessions.
+1. Establish lineage groups and invocation-level duplicate checks on the OM-only view, then freeze train, validation, and test assignments before training. Grouping prevents shared histories from entering both training and evaluation; it does not exclude long sessions or block label generation.
 2. Construct causal Hatfield-contract invocations using the policy bundles, preserving raw evidence separately from model-visible evidence and classifying reconstruction fidelity. Map native memory identities into the target state and its request-local IDs.
-3. Extend the small Python Observer loop only after inspecting the pilot. Add stateful replay, Reflector/Dropper handlers, and evaluation as needed. Keep Hatfield-only training and report native Pi transfer evaluation separately on held-out families.
+3. Inspect the Observer and full memory pilots before scaling label generation. Calibrate evaluation against human reviews. Keep Hatfield-only training and report native Pi transfer evaluation separately on held-out families.
 4. Before remote labeling, check provider permissions and the data that may leave the machine. Run the selected teacher with the same input and contract as the student. Validate actions through isolated local handlers and review labels before exporting training examples. Local unredacted collection does not authorize sending secrets to a provider.
 
 The design remains in [`hatfield-om-dataset-spec/OM-DATA-01.md`](hatfield-om-dataset-spec/OM-DATA-01.md). Model compatibility, token counts, family counts, and training readiness are not measured by this collector.

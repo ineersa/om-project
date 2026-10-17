@@ -7,7 +7,7 @@
 
 ## 0. Decision and scope
 
-Build a **source-grounded, causally replayable dataset of memory-agent invocations**, not a collection of observation strings. Start with **Observer supervised fine-tuning (SFT), using a LoRA baseline**, while exporting enough information to support Reflector and Dropper later. A stronger model proposes labels; deterministic checks, an independent judge, and human-reviewed examples decide whether those labels are usable. Evaluate both individual invocations and the memory accumulated over repeated compactions.
+Build a **source-grounded, causally replayable dataset of memory-agent invocations**, not a collection of observation strings. Start with **Observer supervised fine-tuning (SFT), using a LoRA baseline**, while exporting enough information to support Reflector and Dropper later. Existing outputs and selectively generated corrections provide candidate labels; deterministic checks, an independent judge, and human-reviewed examples decide whether those labels are usable. Evaluate both individual invocations and the memory accumulated over repeated compactions.
 
 The intended training objective is behavior distillation: **given the information this memory agent can actually see, produce the correct memory-tool actions**. Continued pretraining on raw transcripts is a different experiment and is not the recommended first step. Liquid documents SFT with TRL and LoRA. [R2]
 
@@ -321,6 +321,8 @@ Prefer a judge from a different model family/provider when practical, but do not
 
 ### 7.2 Labeling sequence
 
+For the next experiment, follow [OM-PLAN-02](OM-PLAN-02-judge-guided-training.md): evaluate eligible existing candidates, retain good outputs, and generate corrections selectively. The independent-generation sequence below remains an optional labeling path, not a requirement to regenerate every pilot case. Keep its source-grounding and acceptance safeguards for either path.
+
 **Step A — Produce a source-first fact inventory.** A source auditor sees only the permitted input and policy, not Qwen's answer. It identifies supported new facts, existing-memory duplicates, importance, uncertainty, and facts that should remain unrecorded. This inventory is itself a fallible annotation requiring audit.
 
 **Step B — Generate a clean candidate.** The teacher sees the same student-visible task input and emits the real task's tool actions. For the initial pilot, generate independently for every case before showing any Qwen output. This avoids using Qwen's omissions as the teacher's search boundary.
@@ -373,6 +375,8 @@ Store concise evidence-based decision notes, not hidden chain-of-thought transcr
 ## 8. Judge calibration and quality gates
 
 ### 8.1 Do not turn the judge into the ground truth
+
+The quality-certified release policy below is not a prerequisite for the bounded feasibility experiment in [OM-PLAN-02](OM-PLAN-02-judge-guided-training.md). That proposed experiment uses separately identified, machine-reviewed experimental targets without requiring manual curation. Its training run needs explicit authorization for non-certified data. Keep those targets out of approved positive exports and do not promote them to `silver` or `gold` solely because an uncalibrated LLM approved them. Preserve source visibility, structural validation, privacy, and history-family isolation. This exception does not approve a dataset release or production deployment.
 
 Create a human-reviewed development pack spanning corrections, false completions, questions versus assertions, exact numbers/identifiers, misleading prior memory, duplicated facts, long tool results, no-ops, and unsafe pruning. Include deliberately corrupted candidates alongside good candidates. Keep original and corrupted variants in the same split.
 

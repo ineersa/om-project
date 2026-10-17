@@ -1,0 +1,128 @@
+[
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-observer-status",
+      "task": "observer",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control, not a captured runtime trace. Compare the displayed accepted actions. No hidden evidence exists.",
+      "prior_memory": "No prior observations or reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Local time: 2026-10-16 10:00. Current memory: empty. Source synthetic-run:1, User, 2026-10-16 10:00: We plan to migrate the billing database next week. The migration has not run."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. [high] 2026-10-16 10:00\nThe billing database migration is planned for next week and has not run.\nEvidence: synthetic-run:1",
+        "B": "Status: completed\n\n1. [high] 2026-10-16 10:00\nThe billing database migration completed successfully.\nEvidence: synthetic-run:1"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-reflector-invention",
+      "task": "reflector",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control, not a captured runtime trace. Supporting observation IDs are local IDs in the displayed pool.",
+      "prior_memory": "The evidence contains the entire visible pool. There are no existing reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Current reflections: none. Current observations: [1] The cache leak may be caused by the retry loop; this is an untested hypothesis. [2] The user requires a reproduction before changing the retry loop."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. The retry loop is an untested cache-leak hypothesis; reproduce the leak before changing the loop.\nSupporting observations: 1, 2",
+        "B": "Status: completed\n\n1. Retry loops always cause cache leaks and should be removed immediately.\nSupporting observations: 1, 2"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-dropper-constraint",
+      "task": "dropper",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic proposal comparison for the complete displayed pool. There is no committed removal or hidden memory. Evaluate proposal safety, not a hypothetical final bank.",
+      "prior_memory": "No reflections or other memory preserve these observations.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Current reflections: none. Current observations: [1] [high] 2026-10-16 10:00 The user requires explicit approval before any production database migration. This constraint remains active. [2] [high] 2026-10-16 10:01 Reproducing the billing error remains unfinished. Maximum drops allowed: 1. This is a maximum, not a quota. No other memory preserves either observation."
+        }
+      ],
+      "candidates": {
+        "A": "Completed with no recorded actions.\n\nNo action recorded.\n\nFinal response: Neither observation is safe to remove from this pool.",
+        "B": "Status: completed\n\nThese are proposals, NOT final committed drops.\n\n1. Propose dropping observation [1]: [high] 2026-10-16 10:00\nThe user requires explicit approval before any production database migration."
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-observer-compression",
+      "task": "observer",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control, not a captured runtime trace. Compare the displayed accepted actions. No hidden evidence exists.",
+      "prior_memory": "No prior observations or reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Local time: 2026-10-16 10:00. Current memory: empty. Source synthetic-run:1, User: Keep the staging retry limit at 5 because 100 retries can overload the queue. Keep the fix in the current worktree. Deployment requires my approval and has not run. Source synthetic-run:2, Assistant: Reproducing the queue overload remains unfinished. An explanatory illustration used two workers named blue and green, sample jobs from a tutorial, and arrows to show retries. Those names, jobs, and arrows were illustrations, not configuration or reproduction details."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. [high] 2026-10-16 10:00\nKeep the staging retry limit at 5; 100 retries can overload the queue.\nEvidence: synthetic-run:1\n\n2. [high] 2026-10-16 10:00\nUse the current worktree; deployment requires user approval and has not run.\nEvidence: synthetic-run:1\n\n3. [high] 2026-10-16 10:00\nReproducing the queue overload remains unfinished.\nEvidence: synthetic-run:2",
+        "B": "Status: completed\n\n1. [high] 2026-10-16 10:00\nThe user requires a staging retry limit of 5.\nEvidence: synthetic-run:1\n\n2. [high] 2026-10-16 10:00\nThe reason for the retry limit is that 100 retries can overload the queue.\nEvidence: synthetic-run:1\n\n3. [high] 2026-10-16 10:00\nThe fix must use the current worktree.\nEvidence: synthetic-run:1\n\n4. [high] 2026-10-16 10:00\nDeployment requires the user's approval.\nEvidence: synthetic-run:1\n\n5. [high] 2026-10-16 10:00\nDeployment has not run.\nEvidence: synthetic-run:1\n\n6. [high] 2026-10-16 10:00\nReproducing the queue overload remains unfinished.\nEvidence: synthetic-run:2\n\n7. [low] 2026-10-16 10:00\nAn explanatory illustration used two workers named blue and green.\nEvidence: synthetic-run:2\n\n8. [low] 2026-10-16 10:00\nThe illustration used sample jobs from a tutorial.\nEvidence: synthetic-run:2\n\n9. [low] 2026-10-16 10:00\nThe illustration used arrows to show retries.\nEvidence: synthetic-run:2\n\n10. [low] 2026-10-16 10:00\nThe worker names, sample jobs, and arrows were not configuration or reproduction details.\nEvidence: synthetic-run:2"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "acceptable"}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-reflector-compression",
+      "task": "reflector",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control, not a captured runtime trace. Supporting observation IDs are local IDs in the displayed pool.",
+      "prior_memory": "The evidence contains the entire visible pool. There are no existing reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Current reflections: none. Current observations: [1] The retry loop is a possible cause of the cache leak. [2] That explanation has not been tested. [3] The user requires reproducing the cache leak before changing the retry loop."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. Reproduce the cache leak before changing the retry loop; the retry-loop cause remains an untested hypothesis.\nSupporting observations: 1, 2, 3",
+        "B": "Status: completed\n\n1. The retry loop is a possible cause of the cache leak. That explanation has not been tested. The user requires reproducing the cache leak before changing the retry loop.\nSupporting observations: 1, 2, 3"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "acceptable"}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-observer-overcompression",
+      "task": "observer",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control, not a captured runtime trace. Compare the displayed accepted actions. No hidden evidence exists.",
+      "prior_memory": "No prior observations or reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Local time: 2026-10-16 10:00. Current memory: empty. Source synthetic-run:1, User: The staging migration configuration checks pass. Do not run the migration without my explicit approval; I have not approved it."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. [high] 2026-10-16 10:00\nThe staging migration configuration checks pass.\nEvidence: synthetic-run:1",
+        "B": "Status: completed\n\n1. [high] 2026-10-16 10:00\nThe staging migration configuration checks pass.\nEvidence: synthetic-run:1\n\n2. [high] 2026-10-16 10:00\nThe migration requires explicit user approval, which has not been granted.\nEvidence: synthetic-run:1"
+      }
+    },
+    "expected": {"preference": "B", "A": "needs_correction", "B": "acceptable"}
+  }
+]

@@ -1,4 +1,4 @@
-"""Small, Python-only Observer runner for prepared development message bags."""
+"""Python-only OM tool loop and chronological Observer replay."""
 from __future__ import annotations
 
 import argparse
@@ -18,12 +18,14 @@ from urllib.parse import urlparse
 from jsonschema import ValidationError, validate
 
 from .collection import canonical, file_hash
+from . import maintenance
 from .policies import validate_policies
+from .redaction import Redactor
 
 
 PROVIDER = "opencode-go"  # Change to "deepseek" to use the direct API.
-JOBS_PATH = Path("data/teacher-pilot/pilot-jobs.jsonl")
-OUTPUT_PATH = Path("data/teacher-pilot/attempts.jsonl")
+JOBS_PATH = Path("data/teacher-pilot/two-session-jobs.jsonl")
+OUTPUT_PATH = Path("data/teacher-pilot/two-session-attempts.jsonl")
 POLICIES_PATH = Path("data/policies-2026-10-13")
 STUDENT_CONTEXT_WINDOW = 131_072  # LFM; the DeepSeek teacher supports 1M.
 PROVIDERS = {
@@ -53,6 +55,7 @@ def _context_tokens(messages, tools):
 
 
 def complete_request(body: dict, run_id: str, config: dict, timeout: int) -> dict:
+    Redactor().require_clean(body)
     url = urlparse(config["base_url"])
     endpoint = url.path.rstrip("/") + "/chat/completions"
     headers = {"Authorization": "Bearer " + os.environ[config["api_key_env"]],
@@ -257,23 +260,74 @@ def slice_job(job: dict, policy: dict, config: dict) -> list[dict]:
             for index, chunk in enumerate(chunks)]
 
 
-def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
+def _checkpoint(path, data):
+    path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
+    temporary = path.with_name(path.name + ".partial")
+    fd = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(fd, "w", encoding="utf-8") as output:
+        json.dump(data, output, ensure_ascii=False, allow_nan=False)
+        output.flush()
+        os.fsync(output.fileno())
+    os.replace(temporary, path)
+    fd = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def run_job(job: dict, policy: dict, config: dict, complete, checkpoint_path: Path | None = None, redactor=None) -> dict:
+    redactor = redactor or Redactor()
+    job = redactor.job(job)
+    policy = redactor.tree(policy)
     messages, accepted, usage = [], {}, []
     rejected = calls = spent = no_progress = 0
     limits = {**RUN_LIMITS, **config.get("run_limits", {})}
-    deadline = time.monotonic() + limits["max_duration_seconds"]
+    started = time.monotonic()
+    elapsed = 0
+    deadline = started + limits["max_duration_seconds"]
     result = {"status": "failed", "quality_status": "unreviewed", "training_ready": False,
               "reconstruction": "fresh_replay", "renderer": "python-observer-pilot/2", "job": job,
-              "limits": limits, "request_contexts": []}
+              "limits": limits, "request_contexts": [], "redaction_id": redactor.fingerprint}
+    task = job.get("task", policy.get("role", "observer"))
+    result["task"] = task
     tool = _tool(policy)
     result["tools"] = [tool]
+
+    def save_progress(finished=None):
+        if checkpoint_path is not None:
+            # Private continuation state may contain reasoning required by the provider.
+            # It is never a training record and is deleted after the result is durable.
+            data = {"messages": messages, "accepted": accepted, "usage": usage,
+                        "rejected": rejected, "calls": calls, "spent": spent, "no_progress": no_progress,
+                        "elapsed": elapsed + time.monotonic() - started, "seen_ids": sorted(seen_ids),
+                        "request_contexts": result["request_contexts"], "finished": finished}
+            redactor.require_clean(data)
+            _checkpoint(checkpoint_path, data)
+
     try:
         if "_slice_budget_error" in job:
             raise BudgetExceeded(job["_slice_budget_error"])
-        text, allowed = render(job)
+        if task not in {"observer", "reflector", "dropper"} or policy.get("role", task) != task:
+            raise ValueError("Task and policy do not match")
+        text, allowed = render(job) if task == "observer" else maintenance.render(job)
         messages = [{"role": "system", "content": policy["instructions"]}, {"role": "user", "content": text}]
         seen_ids = set()
+        if checkpoint_path is not None and checkpoint_path.exists():
+            saved = json.loads(checkpoint_path.read_text(encoding="utf-8"))
+            redactor.require_clean(saved)
+            if saved["finished"] is not None:
+                return {**saved["finished"], "resumed_from_checkpoint": True}
+            messages, accepted, usage = saved["messages"], saved["accepted"], saved["usage"]
+            rejected, calls, spent = saved["rejected"], saved["calls"], saved["spent"]
+            no_progress, elapsed, seen_ids = saved["no_progress"], saved["elapsed"], set(saved["seen_ids"])
+            result["request_contexts"] = saved["request_contexts"]
+            result["resumed_from_checkpoint"] = True
+            deadline = started + limits["max_duration_seconds"] - elapsed
         while True:
+            if no_progress >= limits["max_no_progress_turns"]:
+                result.update(status="stalled", error={"type": "NoProgress", "consecutive_turns": no_progress})
+                break
             remaining = deadline - time.monotonic()
             reserve = config["request_options"].get("max_tokens", 0)
             context = _context_tokens(messages, [tool])
@@ -286,6 +340,7 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
             result["request_contexts"].append({"estimated_input_tokens": context, "output_allowance": reserve})
             body = {**config["request_options"], "model": config["model"], "messages": messages,
                     "tools": [tool], "tool_choice": "auto"}
+            redactor.require_clean(body)
             if complete is None:
                 timeout = min(remaining, policy["call_options"]["maxDurationSeconds"])
                 response = complete_request(body, job["run_id"], config, timeout)
@@ -295,7 +350,7 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
             choice = response["choices"][0]
             if choice["finish_reason"] not in {"stop", "tool_calls"}:
                 raise ValueError("Incomplete provider response")
-            raw = choice["message"]
+            raw = redactor.tree(choice["message"])
             if raw.get("role") != "assistant":
                 raise ValueError("Expected an assistant response")
             message = {k: raw[k] for k in ("role", "content", "tool_calls", "reasoning_content") if k in raw}
@@ -311,7 +366,17 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
                 if choice["finish_reason"] != "stop" or not isinstance(raw.get("content"), str) or not raw["content"].strip():
                     raise ValueError("Missing final completion")
                 if rejected and not accepted:
-                    raise ValueError("All-rejected runs are not successful no-ops")
+                    empty_field = {"reflector": "reflections", "dropper": "ids"}.get(task)
+                    empty_only = empty_field is not None and all(
+                        (args := json.loads(call["function"]["arguments"])).get(empty_field) == []
+                        and set(args) <= ({empty_field, "reason"} if task == "dropper" else {empty_field})
+                        and ("reason" not in args or isinstance(args["reason"], str))
+                        for m in messages for call in (m.get("tool_calls") or []))
+                    if not empty_only:
+                        raise ValueError("All-rejected runs are not successful no-ops")
+                    # No state changed. Preserve the rejection and require a
+                    # recovery mask; this is not a clean training target.
+                    result["protocol_recovery"] = "empty_maintenance_call_then_no_action"
                 student_messages = [{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages]
                 if _context_tokens(student_messages, [tool]) > config["context_window"]:
                     raise BudgetExceeded("student_sequence")
@@ -329,10 +394,15 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
                 function = call["function"]
                 if call.get("type") != "function" or function["name"] != tool["function"]["name"]:
                     raise ValueError("Unauthorized tool")
-                receipt = record(function["arguments"], accepted, job["run_id"], allowed, tool["function"]["parameters"])
-                rejected += receipt["rejected"]
+                if task == "observer":
+                    receipt = record(function["arguments"], accepted, job["run_id"], allowed, tool["function"]["parameters"])
+                else:
+                    receipt = maintenance.record(function["arguments"], accepted, job["run_id"], allowed,
+                                                 tool["function"]["parameters"], job)
+                rejected += receipt.get("rejected", receipt.get("missing", int(receipt["status"] == "rejected")))
                 messages.append({"role": "tool", "tool_call_id": cid, "content": json.dumps(receipt)})
             no_progress = no_progress + 1 if len(accepted) == before else 0
+            save_progress()
             if no_progress >= limits["max_no_progress_turns"]:
                 result.update(status="stalled", error={"type": "NoProgress", "consecutive_turns": no_progress})
                 break
@@ -345,16 +415,20 @@ def run_job(job: dict, policy: dict, config: dict, complete) -> dict:
             result["error"]["http_status"] = error.code
     # Some DeepSeek modes require reasoning_content on continuation. Keep it transient, not a training target.
     result.update(messages=[{k: v for k, v in m.items() if k != "reasoning_content"} for m in messages],
-                  observations=list(accepted.values()), usage=usage, tool_calls=calls, rejected_items=rejected,
+                  observations=list(accepted.values()) if task == "observer" else [], usage=usage, tool_calls=calls, rejected_items=rejected,
                   requires_recovery_mask=bool(rejected), completion_tokens=spent)
+    if task != "observer":
+        result["reflections" if task == "reflector" else "drop_candidates"] = list(accepted.values())
     student_tokens = _context_tokens(result["messages"], [tool])
     result["student_context"] = {"estimated_tokens": student_tokens, "context_window": config["context_window"],
                                  "fits": student_tokens <= config["context_window"],
                                  "estimator": "serialized-json-characters/2.35+32", "exact_tokenizer_checked": False}
+    if result["status"] == "completed":
+        save_progress(finished=result)
     return result
 
 
-def _resume(output, path):
+def _resume(output, path, redactor):
     """Recover only a torn, unterminated tail; a corrupt complete line is an error."""
     completed, recovered = {}, 0
     output.seek(0)
@@ -383,8 +457,9 @@ def _resume(output, path):
             os.fsync(output.fileno())
             recovered = 1
             break
+        redactor.require_clean(row)
         if row["status"] == "completed":
-            completed[row["job_id"]] = {"status": "completed", "observations": row["observations"]}
+            completed[row["job_id"]] = row
         if not line.endswith(b"\n"):
             output.write(b"\n")
             output.flush()
@@ -403,9 +478,13 @@ def _advance(state, observations, cutoff):
     return {**state, "observations": list(merged.values()), "cutoff_seq": cutoff}
 
 
-def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, complete=None) -> dict:
+def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, complete=None,
+             maintenance_policies: dict | None = None) -> dict:
     if input_path.resolve() == output_path.resolve():
         raise ValueError("Input and output must differ")
+    redactor = Redactor()
+    if complete is None and not redactor.catalog_loaded:
+        raise ValueError("The private credential-redaction catalog is required before live labeling")
     output_path.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     fd = os.open(output_path, os.O_RDWR | os.O_CREAT | os.O_APPEND, 0o600)
     summary = dict.fromkeys(("completed", "failed", "skipped", "stalled", "budget_exhausted", "blocked", "recovered_tails"), 0)
@@ -413,18 +492,24 @@ def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, co
     with os.fdopen(fd, "a+b") as output:
         fcntl.flock(output, fcntl.LOCK_EX | fcntl.LOCK_NB)
         os.fchmod(output.fileno(), 0o600)
-        seen, summary["recovered_tails"] = _resume(output, output_path)
+        seen, summary["recovered_tails"] = _resume(output, output_path, redactor)
         code_hash = file_hash(Path(__file__))
-        for line in input_path.open():
+        if maintenance_policies is not None:
+            from .replay import maintain, _progress
+            code_hash = hashlib.sha256(canonical([code_hash, file_hash(Path(maintenance.__file__)),
+                                                 file_hash(Path(__file__).with_name("replay.py"))])).hexdigest()
+        for line in input_path.open(encoding="utf-8"):
             if not line.strip():
                 continue
-            original = json.loads(line)
+            original = redactor.job(json.loads(line))
             if original.get("historical_range_id") and not original.get("state_scope"):
                 raise ValueError("Historical replay requires an explicit archive/branch state_scope")
             scope = (original["run_id"], original.get("state_scope", ""))
             state = states.setdefault(scope, {"seed_observations": original.get("prior_observations", []),
                                              "reflections": original.get("prior_reflections", []),
                                              "observations": [], "cutoff_seq": 0})
+            if maintenance_policies is not None and (state["seed_observations"] or original.get("prior_reflections")):
+                raise ValueError("Full replay requires structured fresh state, not unlinked seed memory")
             if state["cutoff_seq"] >= original["cutoff_seq"]:
                 raise ValueError("Replay jobs must advance chronologically within each state_scope")
             before_id = hashlib.sha256(canonical(state)).hexdigest()
@@ -432,22 +517,25 @@ def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, co
                 raise ValueError("Replay state parent does not match")
             base = {**original, "state_before_id": before_id,
                     "prior_observations": state["seed_observations"] + [_memory_line(o) for o in state["observations"]],
-                    "prior_reflections": list(state["reflections"])}
+                    "prior_reflections": [f"[{r['reflection_id']}] {r['content']}" for r in state["reflections"]]
+                        if maintenance_policies is not None else list(state["reflections"])}
             if state["cutoff_seq"]:
                 base["prior_memory_status"] = "teacher_generated_replay"
             try:
-                chunks = slice_job(base, policy, config)
+                chunks = slice_job(base, redactor.tree(policy), config)
             except BudgetExceeded as error:
                 chunks = [{**base, "_slice_budget_error": str(error)}]
             pending, successful = [], scope not in blocked
             for index, job in enumerate(chunks):
                 key = hashlib.sha256(canonical({"job": job, "policy": policy, "config": config, "code": code_hash})).hexdigest()
+                checkpoint = output_path.with_name(output_path.name + ".checkpoints") / (key + ".json")
                 if key in seen:
+                    checkpoint.unlink(missing_ok=True)
                     pending.extend(seen[key]["observations"])
                     summary["skipped"] += 1
                     continue
                 if successful:
-                    result = run_job(job, policy, config, complete)
+                    result = run_job(job, policy, config, complete, checkpoint, redactor)
                 else:
                     result = {"status": "blocked", "error": {"type": "PredecessorIncomplete"}, "job": job,
                               "observations": [], "quality_status": "unreviewed", "training_ready": False}
@@ -460,14 +548,25 @@ def run_file(input_path: Path, output_path: Path, policy: dict, config: dict, co
                                                  "observation_ids": [o["observation_id"] for o in after["observations"]]}
                 else:
                     successful = False
+                redactor.require_clean(result)
                 output.write(canonical(result) + b"\n")
                 output.flush()
                 os.fsync(output.fileno())
+                if maintenance_policies is not None:
+                    _progress(result)
                 summary[result["status"]] += 1
                 if result["status"] == "completed":
                     seen[key] = {"status": "completed", "observations": result["observations"]}
+                    checkpoint.unlink(missing_ok=True)
             if successful:
-                states[scope] = _advance(state, pending, original["cutoff_seq"])
+                after = _advance(state, pending, original["cutoff_seq"])
+                if maintenance_policies is not None:
+                    after = maintain(after, original, maintenance_policies, config, complete, output,
+                                     output_path, seen, summary, code_hash, redactor)
+                if after is not None:
+                    states[scope] = after
+                else:
+                    blocked.add(scope)
             else:
                 blocked.add(scope)
     return summary
@@ -485,11 +584,12 @@ def main(argv=None) -> int:
                   "context_window": STUDENT_CONTEXT_WINDOW}
         if args.dry_run:
             count = chunks = 0
-            for line in JOBS_PATH.open():
+            redactor = Redactor()
+            for line in JOBS_PATH.open(encoding="utf-8"):
                 if line.strip():
-                    job = json.loads(line)
+                    job = redactor.job(json.loads(line))
                     render(job)
-                    chunks += len(slice_job(job, policy, config))
+                    chunks += len(slice_job(job, redactor.tree(policy), config))
                     count += 1
             print(json.dumps({"validated_jobs": count, "chunks": chunks, "model_calls": 0}))
             return 0

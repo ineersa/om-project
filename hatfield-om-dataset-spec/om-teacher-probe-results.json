@@ -1,0 +1,28 @@
+{
+  "unchecked_context_and_no_progress": {
+    "summary": {
+      "completed": 1,
+      "failed": 0,
+      "skipped": 0
+    },
+    "provider_calls": 21,
+    "accepted_observations": 1,
+    "tool_calls": 20,
+    "first_request_estimate": 135,
+    "last_request_estimate": 5889,
+    "configured_context": 2000,
+    "output_reserve": 512,
+    "requires_recovery_mask": false
+  },
+  "torn_output_resume": {
+    "exception": "JSONDecodeError",
+    "completed_prefix_preserved": true
+  },
+  "native_fragment_framing": {
+    "chunks": 4,
+    "fragment2_keeps_speaker": false,
+    "fragment2_keeps_source_time": false,
+    "fragment2_still_has_fallback_time": true,
+    "fragment2_source_preview": "[Source entry id: run-1:1]\nd material. Untrusted quoted material. Untrusted quoted material. Untrusted quoted material. Untrusted quoted material. Untrusted quo"
+  }
+}

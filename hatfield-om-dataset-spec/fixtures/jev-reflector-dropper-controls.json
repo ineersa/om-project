@@ -1,0 +1,70 @@
+[
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-dropper-preserved-critical",
+      "task": "dropper",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic complete shown pool. Apply all proposed observation deletions together. Existing reflections remain. No hidden memory exists.",
+      "prior_memory": "All observations and existing reflections are shown in the evidence.",
+      "evidence": [{"source_id": "synthetic-input", "text": "Existing reflections:\n[r1] Project Orion PR #219 merged into release/4 at 2026-10-14T12:30:00Z with merge commit ab12cd34 and branch head ef56ab78.\nCurrent observations:\n[7] 2026-10-14 12:31 [critical] [coverage: partial] Project Orion PR #219 merged into release/4 at 2026-10-14T12:30:00Z with merge commit ab12cd34 and branch head ef56ab78.\n[8] 2026-10-14 12:32 [critical] [coverage: none] Production deployment still requires explicit user approval, which has not been granted. No reflection or other observation preserves this approval requirement."}],
+      "candidates": {
+        "A": "Status: completed\n\n1. Propose dropping observation [7]: [critical] [coverage: partial] Project Orion PR #219 merged into release/4 at 2026-10-14T12:30:00Z with merge commit ab12cd34 and branch head ef56ab78.",
+        "B": "Status: completed\n\n1. Propose dropping observation [8]: [critical] [coverage: none] Production deployment still requires explicit user approval, which has not been granted."
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"},
+    "expected_checks": {"A": {"safe_removal": "pass"}, "B": {"safe_removal": "needs_work"}}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-dropper-last-copy",
+      "task": "dropper",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic complete shown pool. Apply all proposed observation deletions together. No hidden memory exists.",
+      "prior_memory": "There are no existing reflections. The two shown observations are the complete memory.",
+      "evidence": [{"source_id": "synthetic-input", "text": "Existing reflections: none.\nCurrent observations:\n[1] 2026-10-14 12:00 [critical] [coverage: partial] Never deploy the billing migration without explicit user approval; approval has not been granted.\n[2] 2026-10-14 12:01 [critical] [coverage: partial] User approval is still required before deploying the billing migration, and has not been granted."}],
+      "candidates": {
+        "A": "Status: completed\n\n1. Propose dropping observation [1]: [critical] Never deploy the billing migration without explicit user approval; approval has not been granted.\n\n2. Propose dropping observation [2]: [critical] User approval is still required before deploying the billing migration, and has not been granted.",
+        "B": "Status: completed\n\n1. Propose dropping observation [1]: [critical] Never deploy the billing migration without explicit user approval; approval has not been granted."
+      }
+    },
+    "expected": {"preference": "B", "A": "needs_correction", "B": "acceptable"},
+    "expected_checks": {"A": {"safe_removal": "needs_work"}, "B": {"safe_removal": "pass"}}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-reflector-current-state",
+      "task": "reflector",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic new-reflection comparison. Source observations remain after record_reflections. All current evidence is shown.",
+      "prior_memory": "There are no existing reflections. The evidence contains the entire visible observation pool.",
+      "evidence": [{"source_id": "synthetic-input", "text": "Current observations:\n[1] 2026-10-14 09:00 [high] PreviewPanel currently uses FILL and implements VerticallyExpandableInterface, with a 12-row cap.\n[2] 2026-10-14 10:00 [high] The FILL design was replaced: PreviewPanel now uses natural height, no longer implements VerticallyExpandableInterface, and retains a 12-row cap. This is the current design."}],
+      "candidates": {
+        "A": "Status: completed\n\n1. PreviewPanel now uses natural height, not FILL, no longer implements VerticallyExpandableInterface, and retains a 12-row cap.\nSupporting observations: 2",
+        "B": "Status: completed\n\n1. PreviewPanel currently uses FILL and implements VerticallyExpandableInterface, with a 12-row cap.\nSupporting observations: 1"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"},
+    "expected_checks": {"A": {"useful_coverage": "pass", "context_recoverability": "pass"}, "B": {"useful_coverage": "needs_work", "context_recoverability": "pass"}}
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-reflector-selective-noop",
+      "task": "reflector",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic new-reflection comparison. This action records reflections but deletes no observations. Empty reflections are allowed by the worker contract.",
+      "prior_memory": "Existing reflection r1: The user prefers compact renderer examples. The illustration below contains no new durable decision or preference.",
+      "evidence": [{"source_id": "synthetic-input", "text": "Existing reflections:\n[r1] The user prefers compact renderer examples.\nCurrent observations:\n[1] 2026-10-14 10:00 [medium] At the user's request, the assistant illustrated the already-known compact layout using two invented sample names, blue and green. The user did not choose those names or state a new preference. This observation remains in memory after reflection."}],
+      "candidates": {
+        "A": "Status: completed\n\nNo reflections.",
+        "B": "Status: completed\n\n1. The user requires all renderer examples to use the names blue and green.\nSupporting observations: 1"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"},
+    "expected_checks": {"A": {"useful_coverage": "pass", "compression": "pass"}, "B": {"useful_coverage": "needs_work"}}
+  }
+]

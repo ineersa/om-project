@@ -1,0 +1,52 @@
+[
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-observer-identifiers",
+      "task": "observer",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control. Compare these rendered observations, not raw calls. No hidden evidence exists.",
+      "prior_memory": "No prior observations or reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Source synthetic-run:1, User, 2026-10-16 10:00: Resume the renderer fix in widgets/renderer.py for ticket OPS-842. Do not edit widgets/legacy_renderer.py or ticket OPS-824; those are different work. The fix remains unfinished. Keep these identifiers in memory so we resume the right work."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. [high] 2026-10-16 10:00\nResume the unfinished renderer fix in widgets/renderer.py for OPS-842, not widgets/legacy_renderer.py or OPS-824.\nEvidence: synthetic-run:1",
+        "B": "Status: completed\n\n1. [high] 2026-10-16 10:00\nResume the unfinished renderer fix in the correct file for the correct ticket, not the other file or ticket.\nEvidence: synthetic-run:1"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"},
+    "expected_checks": {
+      "A": {"context_recoverability": "pass"},
+      "B": {"context_recoverability": "needs_work"}
+    }
+  },
+  {
+    "case": {
+      "schema_version": "om-review-case/1",
+      "case_id": "control-observer-importance",
+      "task": "observer",
+      "redaction_id": "synthetic",
+      "comparison_scope": "Synthetic semantic control. The only difference is the assigned observation relevance. No hidden evidence exists.",
+      "prior_memory": "No prior observations or reflections.",
+      "evidence": [
+        {
+          "source_id": "synthetic-input",
+          "text": "Source synthetic-run:1, User, 2026-10-16 10:00: Never deploy the billing migration without my explicit approval. I have not approved it. This prohibition remains active across sessions."
+        }
+      ],
+      "candidates": {
+        "A": "Status: completed\n\n1. [critical] 2026-10-16 10:00\nNever deploy the billing migration without explicit user approval; approval has not been granted.\nEvidence: synthetic-run:1",
+        "B": "Status: completed\n\n1. [low] 2026-10-16 10:00\nNever deploy the billing migration without explicit user approval; approval has not been granted.\nEvidence: synthetic-run:1"
+      }
+    },
+    "expected": {"preference": "A", "A": "acceptable", "B": "needs_correction"},
+    "expected_checks": {
+      "A": {"useful_coverage": "pass", "importance_assignment": "pass"},
+      "B": {"useful_coverage": "pass", "importance_assignment": "needs_work"}
+    }
+  }
+]

@@ -295,3 +295,108 @@ def test_causal_state_shared_parts_resume_and_scope_isolation(pilot):
     saved = output.read_bytes()
     assert run_file(source, output, policy, config, lambda *args: pytest.fail("Must restore state from saved deltas"))["completed"] == 0
     assert output.read_bytes() == saved
+
+
+@pytest.mark.parametrize("stop_at", ["tool_round", "result_append"])
+def test_resume_inside_a_chunk_without_repeating_completed_rounds(pilot, monkeypatch, stop_at):
+    from om_dataset import teacher
+
+    source, output, policy, config, observation = pilot
+    original_checkpoint = teacher._checkpoint
+    calls = []
+
+    def interrupt_checkpoint(path, data):
+        original_checkpoint(path, data)
+        if stop_at == "result_append" and data["finished"] is not None:
+            raise KeyboardInterrupt
+
+    def complete(body, run_id):
+        calls.append(json.loads(json.dumps(body)))
+        if len(calls) == 1:
+            return reply([observation])
+        if stop_at == "tool_round":
+            raise KeyboardInterrupt
+        return reply()
+
+    monkeypatch.setattr(teacher, "_checkpoint", interrupt_checkpoint)
+    with pytest.raises(KeyboardInterrupt):
+        run_file(source, output, policy, config, complete)
+    checkpoint, = output.with_name(output.name + ".checkpoints").glob("*.json")
+    assert checkpoint.stat().st_mode & 0o777 == 0o600
+    assert "Do not save this reasoning" in checkpoint.read_text()
+    monkeypatch.setattr(teacher, "_checkpoint", original_checkpoint)
+
+    def resume(body, run_id):
+        assert stop_at == "tool_round", "A durable final response must not be regenerated"
+        assert body["messages"][-1]["role"] == "tool"
+        assert body["messages"][-2]["reasoning_content"] == "Do not save this reasoning."
+        return reply()
+
+    assert run_file(source, output, policy, config, resume)["completed"] == 1
+    result = json.loads(output.read_text())
+    assert result["resumed_from_checkpoint"] and result["tool_calls"] == len(result["observations"]) == 1
+    assert "Do not save this reasoning" not in output.read_text()
+    assert not checkpoint.exists()
+    assert run_file(source, output, policy, config, lambda *args: pytest.fail("Already finished"))["skipped"] == 1
+
+
+def test_redaction_keeps_offsets_and_provenance(pilot):
+    from om_dataset.redaction import Redactor
+
+    source, _, _, _, _ = pilot
+    secret = "sk-" + "a" * 32
+    redactor = Redactor(catalog=None)
+    job = json.loads(source.read_text())
+    text = "Unicode 🦊\n" + secret + "\npassword: xzzz\n[password] => 'xzzz'"
+    job["sources"][0].update(text=text, segments=[{"start": 0, "end": len(text), "framing": "User"}])
+    clean = redactor.job(job)
+    assert len(clean["sources"][0]["text"]) == len(text)
+    assert secret not in clean["sources"][0]["text"] and "xzzz" not in clean["sources"][0]["text"]
+    assert clean["sources"][0]["segments"] == job["sources"][0]["segments"]
+    assert redactor.job(clean) == clean and secret in job["sources"][0]["text"]
+    assert redactor.tree({"password": "xy"}) == {"password": "**"}
+    assert "xy" not in redactor.text("password: xy\\\\n")
+    encoded = json.dumps({"api_key": secret, "password": "xy"})
+    assert json.loads(redactor.text(encoded))["password"] == "**"
+    assert "weak" not in redactor.text("postgresql://user:weak@localhost/db")
+    commit = "a" * 40
+    assert redactor.text("Git commit: " + commit) == "Git commit: " + commit
+    job["run_id"] = secret
+    with pytest.raises(ValueError, match="provenance identity"):
+        redactor.job(job)
+
+
+def test_credentials_never_enter_requests_checkpoints_or_training_records(pilot, monkeypatch):
+    source, output, policy, config, observation = pilot
+    secret = "opaque-test-credential-" + "q" * 24
+    monkeypatch.setenv("REDACTION_TEST_API_KEY", secret)
+    job = json.loads(source.read_text())
+    job["sources"][0]["text"] += " Credential: " + secret
+    job["prior_observations"] = ["Prior memory: " + secret]
+    job["prior_reflections"] = ["Prior reflection: " + secret]
+    source.write_text(json.dumps(job) + "\n")
+    observation["content"] += " Credential: " + secret
+    requests = []
+
+    def complete(body, run_id):
+        assert secret not in json.dumps(body)
+        requests.append(body)
+        if len(requests) == 1:
+            response = reply([observation])
+            response["choices"][0]["message"]["reasoning_content"] = secret
+            return response
+        checkpoint, = output.with_name(output.name + ".checkpoints").glob("*.json")
+        assert secret not in checkpoint.read_text()
+        raise KeyboardInterrupt
+
+    with pytest.raises(KeyboardInterrupt):
+        run_file(source, output, policy, config, complete)
+    assert run_file(source, output, policy, config, lambda *args: reply())["completed"] == 1
+    result = json.loads(output.read_text())
+    assert secret not in output.read_text() and "[REDACTED]" in output.read_text()
+    assert len(result["observations"]) == 1 and result["resumed_from_checkpoint"]
+    # Existing unsafe records must not be trusted by resume or silently reused.
+    result["messages"][0]["content"] += secret
+    output.write_text(json.dumps(result) + "\n")
+    with pytest.raises(ValueError, match="Unredacted credential"):
+        run_file(source, output, policy, config, lambda *args: pytest.fail("Must not call provider"))
